@@ -77,6 +77,7 @@ end
 
 
 function my_client(host::IPAddr=IPv4(0), port=4444)
+    @info "heloo"
     socket = Sockets.connect(host, port)
     map_segments = VehicleSim.training_map()
     
@@ -88,9 +89,27 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
     cam_channel = Channel{CameraMeasurement}(32)
     gt_channel = Channel{GroundTruthMeasurement}(32)
 
-    #localization_state_channel = Channel{MyLocalizationType}(1)
-    #perception_state_channel = Channel{MyPerceptionType}(1)
+    localization_state_channel = Channel{MyLocalizationType}(1)
+    perception_state_channel = Channel{MyPerceptionType}(1)
 
+    target_velocity = 0.0
+    steering_angle = 0.0
+    controlled = true
+
+    client_info_string = 
+        "********************
+      TITANS REVING
+      ********************"
+
+    @info client_info_string
+    steering_angle = 0
+    target_velocity = 0
+    while controlled && isopen(socket)
+        cmd = (steering_angle, target_velocity, controlled)
+        serialize(socket, cmd)
+    end
+
+    @info gps_channel, imu_channel, cam_channel, gt_channel, localization_state_channel
     target_map_segment = 0 # (not a valid segment, will be overwritten by message)
     ego_vehicle_id = 0 # (not a valid id, will be overwritten by message. This is used for discerning ground-truth messages)
 
