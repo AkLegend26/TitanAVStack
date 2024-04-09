@@ -32,20 +32,36 @@ function keyboard_client(host::IPAddr=IPv4(0), port=4444; v_step = 1.0, s_step =
         num_gps = 0
         num_gt = 0
         for meas in measurements
-            if meas isa GroundTruthMeasurement
-                 # Ground truth - used for error measurement
-                gt_position = meas.position[1:2]  # Assuming 2D for simplicity
-                gt_orientation = meas.orientation
-            else
-                # Update EKF with IMU, GPS, and Camera measurements
+            if meas isa GPSMeasurement
+                !isfull(gps_channel) && put!(gps_channel, meas)
+                @info "before gps"
                 ekf_update!(ekf, meas)
+                @info "after gps"
+            elseif meas isa IMUMeasurement
+                @info "in imu"
+                !isfull(imu_channel) && put!(imu_channel, meas)
+                ekf_update!(ekf, meas)
+            elseif meas isa CameraMeasurement
+                @info "in cam"
+                !isfull(cam_channel) && put!(cam_channel, meas)
+            elseif meas isa GroundTruthMeasurement
+                @info "in gt"
+                !isfull(gt_channel) && put!(gt_channel, meas)
             end
         end
+            # if meas isa GroundTruthMeasurement
+            #      # Ground truth - used for error measurement
+            #     gt_position = meas.position[1:2]  # Assuming 2D for simplicity
+            #     gt_orientation = meas.orientation
+            # else
+            #     # Update EKF with IMU, GPS, and Camera measurements
+            #     ekf_update!(ekf, meas)
+            # end
 
-        estimated_position = ekf.state[1:2]  # Assuming state vector format matches EKF setup
-        position_error = norm(estimated_position - gt_position)
+        # estimated_position = ekf.state[1:2]  # Assuming state vector format matches EKF setup
+        # position_error = norm(estimated_position - gt_position)
         
-        @info "Position Error: $position_error"
+        # @info "Position Error: $position_error"
         @info "Measurements received: $num_gt gt; $num_cam cam; $num_imu imu; $num_gps gps"
     end
     
@@ -55,13 +71,8 @@ function keyboard_client(host::IPAddr=IPv4(0), port=4444; v_step = 1.0, s_step =
     
     client_info_string = 
         "********************
-      Keyboard Control (manual mode)
-      ********************
-        -Press 'q' at any time to terminate vehicle.
-        -Press 'i' to increase vehicle speed.
-        -Press 'k' to decrease vehicle speed.
-        -Press 'j' to increase steering angle (turn left).
-        -Press 'l' to decrease steering angle (turn right)."
+      Titans Reving
+      ********************"
     @info client_info_string
     while controlled && isopen(socket)
         key = get_c()

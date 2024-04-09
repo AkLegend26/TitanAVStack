@@ -142,12 +142,31 @@ function h_imu(state)
     return [v; ϕ]  # Simplified IMU measurement model; adjust ϕ as per your system's modeling
 end
 
+function h_gps(state::Vector{Float64})
+    # Assuming state = [x, y, θ, v, ϕ, ...]
+    # And GPS measures x, y position
+    return state[1:2]  # Return the predicted GPS measurement (x, y position)
+end
+
+
 function Jac_h_imu(state)
     J = zeros(2, length(state))
     J[1, 4] = 1  # Partial derivative of v with respect to itself
     J[2, 5] = 1  # Assuming direct influence of ϕ on the angular velocity component
     return J
 end
+
+function Jac_h_gps(state::Vector{Float64})
+    # Create a matrix filled with zeros
+    J = zeros(2, length(state))
+    
+    # The derivative of the GPS measurement (x, y) with respect to the position (x, y) is 1
+    J[1, 1] = 1  # Partial derivative of x position measurement with respect to x state
+    J[2, 2] = 1  # Partial derivative of y position measurement with respect to y state
+    
+    return J
+end
+
 
 function process_camera_measurement(measurement::CameraMeasurement)
     # Simplified processing; in reality, would involve more complex calculations based on camera model
@@ -186,8 +205,16 @@ end
 
 function ekf_update!(ekf::ExtendedKalmanFilter, measurement)
     if isa(measurement, GPSMeasurement)
-        # GPS update logic as before
+        # Convert GPS lat/long to local map frame if necessary
+        # Here, assume lat and long are already in the format of x and y
+        @info "gps measured"
+        gps_position = [measurement.lat, measurement.long]  # Actual GPS measurement
+        
+        H_gps = Jac_h_gps(ekf.state)  # Jacobian of the GPS measurement model
+        z_pred_gps = h_gps(ekf.state)  # Predicted GPS measurement
+        update_ekf!(ekf, H_gps, gps_position, z_pred_gps, ekf.measurement_noise_gps)  # Update the EKF
     elseif isa(measurement, IMUMeasurement)
+        @info "imu measured"
         # IMU update logic
         # Hypothetical function calls (you need to implement these based on your system's specifics)
         H_imu = Jac_h_imu(ekf.state) # Jacobian of the IMU measurement function
@@ -197,16 +224,16 @@ function ekf_update!(ekf::ExtendedKalmanFilter, measurement)
     elseif isa(measurement, CameraMeasurement)
         # Camera update logic
         # Again, hypothetical function calls
-        H_camera = Jac_h_camera(ekf.state) # Jacobian of the camera measurement function
-        z_pred_camera = h_camera(ekf.state) # Predicted camera measurement
-        # Camera measurement conversion is more complex, likely involving bounding box processing
-        z_camera = process_camera_measurement(measurement) # You need to implement this function
-        update_ekf!(ekf, H_camera, z_camera, z_pred_camera, ekf.measurement_noise_camera)
+        # H_camera = Jac_h_camera(ekf.state) # Jacobian of the camera measurement function
+        # z_pred_camera = h_camera(ekf.state) # Predicted camera measurement
+        # # Camera measurement conversion is more complex, likely involving bounding box processing
+        # z_camera = process_camera_measurement(measurement) # You need to implement this function
+        # update_ekf!(ekf, H_camera, z_camera, z_pred_camera, ekf.measurement_noise_camera)
     elseif isa(measurement, GroundTruthMeasurement)
         # Ground truth update logic
         # Ground truth can be used for validation or as a direct state update in some cases
         # Direct state update from ground truth is not typical for EKF but shown here for completeness
-        ekf.state = [measurement.position; measurement.orientation; measurement.velocity; measurement.angular_velocity]
+        # ekf.state = [measurement.position; measurement.orientation; measurement.velocity; measurement.angular_velocity]
         # You might not directly use ground truth this way in a real system, but rather for validation
     end
 end
