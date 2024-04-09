@@ -6,5 +6,6 @@ using Serialization
 
 include("client.jl")
 include("example_project.jl")
+include("localization.jl")
 
 end # module TitanAVStack

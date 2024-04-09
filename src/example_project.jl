@@ -9,22 +9,26 @@ struct MyPerceptionType
 end
 
 function localize(gps_channel, imu_channel, localization_state_channel)
-    # Set up algorithm / initialize variables
+    ekf = ekf_initialize()
+
     while true
         fresh_gps_meas = []
         while isready(gps_channel)
             meas = take!(gps_channel)
+            ekf_update!(ekf, meas)
             push!(fresh_gps_meas, meas)
         end
         fresh_imu_meas = []
         while isready(imu_channel)
             meas = take!(imu_channel)
+            ekf_update!(ekf, meas)
             push!(fresh_imu_meas, meas)
         end
         
-        # process measurements
+        
 
-        localization_state = MyLocalizationType(0,0.0)
+        # localization_state = MyLocalizationType(0,0.0)
+        localization_state = MyLocalizationType(ekf.state[1], ekf.state[2])  # Example of creating a custom localization state based on EKF estimate
         if isready(localization_state_channel)
             take!(localization_state_channel)
         end
@@ -77,6 +81,7 @@ end
 
 
 function my_client(host::IPAddr=IPv4(0), port=4444)
+    @info "TITANSNSNSNNS"
     socket = Sockets.connect(host, port)
     map_segments = VehicleSim.training_map()
     
@@ -88,8 +93,8 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
     cam_channel = Channel{CameraMeasurement}(32)
     gt_channel = Channel{GroundTruthMeasurement}(32)
 
-    #localization_state_channel = Channel{MyLocalizationType}(1)
-    #perception_state_channel = Channel{MyPerceptionType}(1)
+    localization_state_channel = Channel{MyLocalizationType}(1)
+    perception_state_channel = Channel{MyPerceptionType}(1)
 
     target_map_segment = 0 # (not a valid segment, will be overwritten by message)
     ego_vehicle_id = 0 # (not a valid id, will be overwritten by message. This is used for discerning ground-truth messages)
