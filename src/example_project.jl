@@ -33,8 +33,10 @@ function localize(gps_channel, imu_channel, localization_state_channel)
 end
 
 function perception(cam_meas_channel, localization_state_channel, perception_state_channel)
+    @info "Perception..."
     # set up stuff
     while true
+        sleep(0.001)
         fresh_cam_meas = []
         while isready(cam_meas_channel)
             meas = take!(cam_meas_channel)
@@ -51,6 +53,7 @@ function perception(cam_meas_channel, localization_state_channel, perception_sta
         end
         put!(perception_state_channel, perception_state)
     end
+    @info "Perception out!!"
 end
 
 function decision_making(localization_state_channel, 
@@ -75,9 +78,9 @@ function isfull(ch::Channel)
     length(ch.data) ≥ ch.sz_max
 end
 
-
 function my_client(host::IPAddr=IPv4(0), port=4444)
-    @info "heloo"
+    @info "hello"
+
     socket = Sockets.connect(host, port)
     map_segments = VehicleSim.training_map()
     
@@ -102,16 +105,12 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
       ********************"
 
     @info client_info_string
-    steering_angle = 0
-    target_velocity = 0
-    while controlled && isopen(socket)
-        cmd = (steering_angle, target_velocity, controlled)
-        serialize(socket, cmd)
-    end
 
-    @info gps_channel, imu_channel, cam_channel, gt_channel, localization_state_channel
-    target_map_segment = 0 # (not a valid segment, will be overwritten by message)
+    target_map_segment = 0 # (not a valid segment, will be overwritten by message) #del
     ego_vehicle_id = 0 # (not a valid id, will be overwritten by message. This is used for discerning ground-truth messages)
+    
+    @info gps_channel, imu_channel
+
 
     errormonitor(@async while true
         # This while loop reads to the end of the socket stream (makes sure you
@@ -119,6 +118,7 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
         sleep(0.001)
         local measurement_msg
         received = false
+
         while true
             @async eof(socket)
             if bytesavailable(socket) > 0
