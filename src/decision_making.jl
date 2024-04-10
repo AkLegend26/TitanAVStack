@@ -15,7 +15,7 @@ end
 function calculate_steering_angle(vehicle_state::VehicleState, goal::Goal)
     # Placeholder: Calculate angle to goal and adjust steering accordingly
     # This should be replaced with a more sophisticated method considering vehicle dynamics
-    direction_to_goal = atan2(goal.y - vehicle_state.y, goal.x - vehicle_state.x)
+    direction_to_goal = atan(goal.y - vehicle_state.y, goal.x - vehicle_state.x)
     steering_angle = direction_to_goal - vehicle_state.heading
     return steering_angle  # You might need to adjust this calculation
 end

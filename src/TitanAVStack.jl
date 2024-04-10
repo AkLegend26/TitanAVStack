@@ -5,6 +5,7 @@ using Sockets
 using Serialization
 using LinearAlgebra
 using StaticArrays
+using RigidBodyDynamics
 
 include("Routing.jl")
 include("control.jl")

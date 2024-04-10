@@ -1,3 +1,5 @@
+include("decision_making.jl")
+
 # Sample function to print a segment and its direct connections
 function print_segment_connections(segment_id, all_segs)
     segment = all_segs[segment_id]
@@ -19,7 +21,7 @@ end
 using LinearAlgebra  # For distance calculation
 
 # Simple heuristic: straight-line distance between segment midpoints
-function heuristic_cost(seg_a::RoadSegment, seg_b::RoadSegment)
+function heuristic_cost(seg_a::Goal, seg_b::Goal)
     mid_a = (seg_a.lane_boundaries[1].pt_a + seg_a.lane_boundaries[end].pt_b) / 2
     mid_b = (seg_b.lane_boundaries[1].pt_a + seg_b.lane_boundaries[end].pt_b) / 2
     return norm(mid_a - mid_b)
