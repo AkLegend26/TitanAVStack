@@ -33,7 +33,8 @@ end
 function compute_next_command(vehicle_state::VehicleState, goal::Goal)
     steering_angle = calculate_steering_angle(vehicle_state, goal)
     velocity = calculate_velocity(vehicle_state, goal)
-    return VehicleCommand(steering_angle, velocity, true)  # Assumes VehicleCommand struct is defined elsewhere
+    #return VehicleCommand(steering_angle, velocity, true)  # Assumes VehicleCommand struct is defined elsewhere
+    return steering_angle, velocity
 end
 
 # Example usage
@@ -41,7 +42,7 @@ current_state = VehicleState(0.0, 0.0, 0.0)  # Starting at origin, facing right 
 goal = Goal(10.0, 10.0)  # Goal position
 
 # Compute the next command based on the current state and goal
-next_command = compute_next_command(current_state, goal)
+#next_command = compute_next_command(current_state, goal)
 
 # Print the command (for demonstration; in practice, you would send this command to the vehicle control system)
-println("Steering Angle: $(next_command.steering_angle), Velocity: $(next_command.velocity)")
+println("Steering Angle: $(steering_angle), Velocity: $(velocity)")
