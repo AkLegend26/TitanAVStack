@@ -18,12 +18,22 @@ end
 
 function keyboard_client(host::IPAddr=IPv4(0), port=4444; v_step = 1.0, s_step = π/10)
     @info "ADAM"
+    
+    gps_channel = Channel{GPSMeasurement}(32)
+    imu_channel = Channel{IMUMeasurement}(32)
+    cam_channel = Channel{CameraMeasurement}(32)
+    gt_channel = Channel{GroundTruthMeasurement}(32)
+    
+    localization_state_channel = Channel{MyLocalizationType}(1)
+    perception_state_channel = Channel{MyPerceptionType}(1)
+
     socket = Sockets.connect(host, port)
     (peer_host, peer_port) = getpeername(socket)
     msg = deserialize(socket) # Visualization info
     @info msg
+    ekf1 = ekf_initialize()
 
-    @async while isopen(socket)
+    while isopen(socket)
         sleep(0.001)
         state_msg = deserialize(socket)
         measurements = state_msg.measurements
@@ -34,16 +44,14 @@ function keyboard_client(host::IPAddr=IPv4(0), port=4444; v_step = 1.0, s_step =
         for meas in measurements
             if meas isa GPSMeasurement
                 !isfull(gps_channel) && put!(gps_channel, meas)
-                @info "before gps"
-                ekf_update!(ekf, meas)
-                @info "after gps"
+                
             elseif meas isa IMUMeasurement
                 @info "in imu"
                 !isfull(imu_channel) && put!(imu_channel, meas)
-                ekf_update!(ekf, meas)
-            elseif meas isa CameraMeasurement
-                @info "in cam"
-                !isfull(cam_channel) && put!(cam_channel, meas)
+                ekf_update!(ekf1, meas)
+            #elseif meas isa CameraMeasurement
+             #   @info "in cam"
+              #  !isfull(cam_channel) && put!(cam_channel, meas)
             elseif meas isa GroundTruthMeasurement
                 @info "in gt"
                 !isfull(gt_channel) && put!(gt_channel, meas)
@@ -62,7 +70,7 @@ function keyboard_client(host::IPAddr=IPv4(0), port=4444; v_step = 1.0, s_step =
         # position_error = norm(estimated_position - gt_position)
         
         # @info "Position Error: $position_error"
-        @info "Measurements received: $num_gt gt; $num_cam cam; $num_imu imu; $num_gps gps"
+        #@info "Measurements received: $num_gt gt; $num_cam cam; $num_imu imu; $num_gps gps"
     end
     
     target_velocity = 0.0

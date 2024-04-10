@@ -1,82 +1,12 @@
-# Assume inclusion of Measurement structs and related functions as provided
-
-# making sure it runs
-# test code for localization code, comparing ground truth measurements with my estimates, print diagnosis logs
-# drive around with keyboard client, localization error stays error
-
-abstract type Measurement end
-
-"""
-Records lat/long measurements (expressed as first and second coordinates of map frame)
-of GPS sensor.
-"""
-struct GPSMeasurement <: Measurement
-    time::Float64
-    lat::Float64
-    long::Float64
-    heading::Float64
-end
-
-"""
-Records linear and angular velocity experienced instantaneously by IMU sensor,
-in local frame of IMU.
-"""
-struct IMUMeasurement <: Measurement
-    time::Float64
-    linear_vel::SVector{3, Float64}
-    angular_vel::SVector{3, Float64}
-end
-
-"""
-Records list of bounding boxes represented by top-left and bottom-right pixel coordinates.
-Camera_id is 1 or 2, indicating which camera produced the bounding boxes.
-
-Pixels start from (1,1) in top-left corner of image, and proceed right (first axis) and down (second axis)
-to image_width and image_height pixels.
-
-Each pixel corresponds to a pixel_len x pixel_len patch at focal_len away from a pinhole model.
-"""
-struct CameraMeasurement <: Measurement
-    time::Float64
-    camera_id::Int
-    focal_length::Float64
-    pixel_length::Float64
-    image_width::Int # pixels
-    image_height::Int # pixels
-    bounding_boxes::Vector{SVector{4, Int}}
-end
-
-"""
-Records position, orientation, linear and angular velocity, and size of 3D bounding box of vehicle
-specified by vehicle ID
-"""
-struct GroundTruthMeasurement <: Measurement
-    time::Float64
-    vehicle_id::Int
-    position::SVector{3, Float64} # position of center of vehicle
-    orientation::SVector{4, Float64} # represented as quaternion
-    velocity::SVector{3, Float64}
-    angular_velocity::SVector{3, Float64} # angular velocity around x,y,z axes
-    size::SVector{3, Float64} # length, width, height of 3d bounding box centered at (position/orientation)
-end
-
-"""
-Vehicle ID is the id of the vehicle receiving this message.
-target segment is the map segment that should be driven to.
-mesaurements are the latest sensor measurements.
-"""
-struct MeasurementMessage
-    vehicle_id::Int
-    target_segment::Int
-    measurements::Vector{Measurement}
-end
-
 # Implement an EKF for vehicle localization
 struct ExtendedKalmanFilter
     state::Vector{Float64} # Vehicle state: position, quaternion, velocity, angular velocity
     covariance::Matrix{Float64} # State covariance matrix
     process_noise::Matrix{Float64} # Process noise covariance
     measurement_noise::Matrix{Float64} # Measurement noise covariance
+    measurement_noise_gps::Matrix{Float64}
+    measurement_noise_imu::Matrix{Float64}
+    measurement_noise_cam::Matrix{Float64}
 end
 
 # state transition function
@@ -193,7 +123,10 @@ function ekf_initialize()
     covariance = diagm(0 => ones(13))
     process_noise = diagm(0 => 0.1 .* ones(13))
     measurement_noise = diagm(0 => [0.1, 0.1, 0.01]) # GPS measurement noise as an example
-    ExtendedKalmanFilter(state, covariance, process_noise, measurement_noise)
+    measurement_noise_gps = diagm(0 => [0.1, 0.1, 0.01]) 
+    measurement_noise_imu = diagm(0 => [0.1, 0.1, 0.01]) 
+    measurement_noise_cam = diagm(0 => [0.1, 0.1, 0.01]) 
+    ExtendedKalmanFilter(state, covariance, process_noise, measurement_noise, measurement_noise_gps, measurement_noise_imu, measurement_noise_cam)
 end
 
 function ekf_predict!(ekf::ExtendedKalmanFilter, Δt::Float64)
