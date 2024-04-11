@@ -9,6 +9,8 @@ struct ExtendedKalmanFilter
     measurement_noise_cam::Matrix{Float64}
 end
 
+const L = 2.0 # Example value
+
 # state transition function
 function f_ackermann(x, u, Δt)
     # x: state vector [x, y, θ, v, ϕ] where
@@ -66,11 +68,25 @@ function Jac_hx_extended(state)
 end
 
 function h_imu(state)
-    # Assuming state = [x, y, θ, v, ϕ, dx, dy, dv, d_stop], extract v and a representation of angular velocity
-    v = state[4]  # Linear velocity
-    ϕ = state[5]  # Steering angle, used to infer angular velocity
-    return [v; ϕ]  # Simplified IMU measurement model; adjust ϕ as per your system's modeling
+    # Assuming state = [x, y, z, ωx, ωy, ωz, vx, vy, vz, ...] where
+    # ωx, ωy, ωz: angular velocities around each axis
+    # vx, vy, vz: velocities along each axis
+
+    # Extract linear velocity components
+    vx = state[7]
+    vy = state[8]
+    vz = state[9]
+
+    # Extract angular velocity components
+    ωx = state[4]
+    ωy = state[5]
+    ωz = state[6]
+
+    # Return the 6-dimensional vector representing IMU measurements
+    # [vx, vy, vz, ωx, ωy, ωz]
+    return [vx, vy, vz, ωx, ωy, ωz]
 end
+
 
 function h_gps(state::Vector{Float64})
     # Assuming state = [x, y, θ, v, ϕ, ...]
@@ -80,11 +96,24 @@ end
 
 
 function Jac_h_imu(state)
-    J = zeros(2, length(state))
-    J[1, 4] = 1  # Partial derivative of v with respect to itself
-    J[2, 5] = 1  # Assuming direct influence of ϕ on the angular velocity component
+    # Assuming the state vector layout from h_imu function
+    # The size of J is 6xN, where N is the number of elements in the state vector
+    J = zeros(6, length(state))
+
+    # Map the direct relationship of the state components to the IMU measurements
+    # For linear velocities
+    J[1, 7] = 1  # vx
+    J[2, 8] = 1  # vy
+    J[3, 9] = 1  # vz
+
+    # For angular velocities
+    J[4, 4] = 1  # ωx
+    J[5, 5] = 1  # ωy
+    J[6, 6] = 1  # ωz
+
     return J
 end
+
 
 function Jac_h_gps(state::Vector{Float64})
     # Create a matrix filled with zeros
@@ -145,6 +174,12 @@ function ekf_update!(ekf::ExtendedKalmanFilter, measurement)
         
         H_gps = Jac_h_gps(ekf.state)  # Jacobian of the GPS measurement model
         z_pred_gps = h_gps(ekf.state)  # Predicted GPS measurement
+
+        @info H_gps
+        @info gps_position
+        @info z_pred_gps
+        @info ekf.measurement_noise_imu
+        
         update_ekf!(ekf, H_gps, gps_position, z_pred_gps, ekf.measurement_noise_gps)  # Update the EKF
     elseif isa(measurement, IMUMeasurement)
         @info "imu measured"
@@ -153,6 +188,12 @@ function ekf_update!(ekf::ExtendedKalmanFilter, measurement)
         H_imu = Jac_h_imu(ekf.state) # Jacobian of the IMU measurement function
         z_pred_imu = h_imu(ekf.state) # Predicted IMU measurement
         z_imu = [measurement.linear_vel; measurement.angular_vel] # Actual IMU measurement
+
+        @info H_imu
+        @info z_imu
+        @info z_pred_imu
+        @info ekf.measurement_noise_imu
+
         update_ekf!(ekf, H_imu, z_imu, z_pred_imu, ekf.measurement_noise_imu) # Use a generalized update function
     elseif isa(measurement, CameraMeasurement)
         # Camera update logic
