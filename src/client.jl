@@ -37,24 +37,32 @@ function async_deserialize(socket::TCPSocket, timeout_seconds::Float64 = 5.0)
     return result_channel
 end
 
-function wait_for_deserialize(channel::Channel, timeout::Float64)
-    # Start a task to take from the channel
-    take_task = @async take!(channel)
-    
-    # Wait for the task to complete or for the timeout
-    try
-        wait(take_task; timeout=timeout)
-        return fetch(take_task)  # Retrieve the result if available
-    catch e
-        if isa(e, TaskFailedException) && isa(e.cause, TimeoutException)
-            @warn "Timeout occurred while waiting for data."
-            return :timeout  # Indicate a timeout occurred
-        else
-            @error "Unexpected error: $e"
-            return e  # Return the error for further handling
+function wait_for_deserialize(channel::Channel, timeout_seconds::Float64)
+    result = Ref{Any}(nothing)
+    done = Ref(false)
+
+    @async begin
+        result[] = take!(channel)  # Attempt to take from the channel
+        done[] = true
+    end
+
+    timer = Timer(timeout_seconds) do _
+        if !done[]
+            done[] = true
+            result[] = :timeout  # Indicate a timeout occurred
         end
     end
+
+    # Wait for either the take operation to complete or the timer to expire
+    while !done[]
+        sleep(0.1)  # Adjust the sleep time as needed
+    end
+
+    close(timer)  # Ensure the timer is closed to avoid any leaks
+
+    return result[]
 end
+
 
 function keyboard_client(host::IPAddr=IPv4(0), port=4444; v_step = 1.0, s_step = π/10)
     @info "ADAM"
@@ -98,7 +106,7 @@ function keyboard_client(host::IPAddr=IPv4(0), port=4444; v_step = 1.0, s_step =
         state_msg_channel = async_deserialize(socket)
         try
         # Now, use this function instead of directly calling take!(state_msg_channel)
-        timeout_seconds = 5.0  # Define your timeout duration
+        timeout_seconds = 20.0  # Define your timeout duration
         state_msg_result = wait_for_deserialize(state_msg_channel, timeout_seconds)
 
         if state_msg_result === :timeout
