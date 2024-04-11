@@ -53,23 +53,28 @@ function perception(cam_meas_channel, localization_state_channel, perception_sta
     end
 end
 
-function decision_making(localization_state_channel, 
-        perception_state_channel, 
-        map, 
-        target_road_segment_id, 
-        socket)
-    # do some setup
+function decision_making(localization_state_channel, perception_state_channel, map, target_road_segment_id, socket)
     while true
         latest_localization_state = fetch(localization_state_channel)
         latest_perception_state = fetch(perception_state_channel)
 
-        # figure out what to do ... setup motion planning problem etc
-        steering_angle = 0.0
-        target_vel = 0.0
-        cmd = VehicleCommand(steering_angle, target_vel, true)
-        serialize(socket, cmd)
+        # Placeholder for current vehicle state and goal definition
+        current_state = VehicleState(latest_localization_state.field1, latest_localization_state.field2, 0.0)  # Adjust as necessary
+        goal = Goal(10.0,10.0)  # Define how you determine the goal (10,10 for now just for testing)
+
+        # Pathfinding to determine route
+        path = a_star_search(map, current_state, goal)  # Adjust this call as necessary
+        waypoints = path_to_waypoints(path, map)  # Convert path to waypoints
+        
+        # Iterate over waypoints to guide vehicle
+        for waypoint in waypoints
+            command = compute_next_command(current_state, waypoint)  # Generate command for each waypoint
+            serialize(socket, VehicleCommand(command[1], command[2], true))  # Adjust as necessary to apply command
+            # Update current_state based on simulation or real-world feedback
+        end
     end
 end
+
 
 function isfull(ch::Channel)
     length(ch.data) ≥ ch.sz_max

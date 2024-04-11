@@ -46,3 +46,14 @@ goal = Goal(10.0, 10.0)  # Goal position
 
 # Print the command (for demonstration; in practice, you would send this command to the vehicle control system)
 println("Steering Angle: $(steering_angle), Velocity: $(velocity)")
+
+function navigate_along_path(waypoints, initial_state)
+    vehicle_state = initial_state
+    for goal in waypoints
+        command = compute_next_command(vehicle_state, goal)
+        # Apply the command to the vehicle, potentially updating `vehicle_state`
+        # This step depends on how your vehicle's simulation or control system is set up
+        println("Steering Angle: $(command[1]), Velocity: $(command[2])")
+        # You may need a mechanism to simulate the vehicle's movement or receive updated state from sensors
+    end
+end

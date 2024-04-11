@@ -72,3 +72,14 @@ function reconstruct_path(cameFrom, current_id)
     end
     return reverse(path)
 end
+
+# Convert path segments into waypoints
+function path_to_waypoints(path, all_segs)
+    waypoints = []
+    for seg_id in path
+        seg = all_segs[seg_id]
+        goal = Goal((seg.lane_boundaries[1].pt_a + seg.lane_boundaries[end].pt_b) / 2)
+        push!(waypoints, goal)
+    end
+    return waypoints
+end
