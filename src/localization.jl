@@ -1,251 +1,196 @@
-# Implement an EKF for vehicle localization
-struct ExtendedKalmanFilter
-    state::Vector{Float64} # Vehicle state: position, quaternion, velocity, angular velocity
-    covariance::Matrix{Float64} # State covariance matrix
-    process_noise::Matrix{Float64} # Process noise covariance
-    # measurement_noise::Matrix{Float64} # Measurement noise covariance
-    measurement_noise_gps::Matrix{Float64}
-    measurement_noise_imu::Matrix{Float64}
-    measurement_noise_cam::Matrix{Float64}
+mutable struct ExtendedKalmanFilter
+    state::Vector{Float64}                # Expanded state vector if needed
+    covariance::Matrix{Float64}           # Covariance matrix for the state vector
+    process_noise::Matrix{Float64}        # Process noise covariance matrix
+    measurement_noise_gps::Matrix{Float64}  # Measurement noise matrix for GPS
+    measurement_noise_imu::Matrix{Float64}  # Measurement noise matrix for IMU
 end
 
-const L = 2.0 # Example value
+function J_R_q(q)
+    qw = q[1]
+    qx = q[2]
+    qy = q[3]
+    qz = q[4]
 
-# state transition function
-function f_ackermann(x, u, Δt)
-    # x: state vector [x, y, θ, v, ϕ] where
-    # x, y: position, θ: orientation, v: velocity, ϕ: steering angle
-    # u: control inputs [a, δ] where
-    # a: acceleration, δ: change in steering angle
+    dRdq1 = 2*[qw -qz qy;
+             qz qw -qx;
+             -qy qx qw]
+    dRdq2 = 2*[qx qy qz;
+               qy -qx -qw;
+               qz qw -qx]
+    dRdq3 = 2*[-qy qx qw;
+               qx qy qz;
+               -qw qz -qy]
+    dRdq4 = 2*[-qz -qw qx;
+               qw -qz qy;
+               qx qy qz]
+    (dRdq1, dRdq2, dRdq3, dRdq4)
+end
 
+function J_Tbody(x)
+    J_Tbody_xyz = (zeros(3,4), zeros(3,4), zeros(3,4))
+    for i = 1:3
+       J_Tbody_xyz[i][i,4] = 1.0
+    end
+    return (J_Tbody_xyz, [[dR zeros(3)] for dR in J_R_q(x[4:7])])
+end
+
+function f_ackermann(x, Δt)
+    # Assuming constant velocity model for simplification
     θ = x[3]
     v = x[4]
-    ϕ = x[5]
-    a = u[1]
-    δ = u[2]
-
-    # Update steering angle
-    ϕ += δ * Δt
-
-    # Ackermann steering model equations
     new_x = x[1] + v * cos(θ) * Δt
     new_y = x[2] + v * sin(θ) * Δt
-    new_θ = θ + (v / L) * tan(ϕ) * Δt  # L is the wheelbase length
-    new_v = v + a * Δt
-
-    return [new_x, new_y, new_θ, new_v, ϕ]
+    return [new_x, new_y, θ, v]
 end
 
-function h_extended(state)
-    # Direct extraction of the relative position, velocity, and stop sign distance
-    # from the state vector.
-    dx = state[6]
-    dy = state[7]
-    dv = state[8]
-    d_stop = state[9]
-
-    # Here, the measurement model simply reflects the extended state components directly.
-    # In a real system, this function would model how these state variables are observed
-    # by the sensors (e.g., transforming relative positions from the vehicle's coordinate
-    # frame to a global frame, or vice versa).
-    
-    return [dx, dy, dv, d_stop]
+function extract_yaw_from_quaternion(q)
+    atan(2(q[1]*q[4]+q[2]*q[3]), 1-2*(q[3]^2+q[4]^2))
 end
 
-function Jac_hx_extended(state)
-    # For simplicity, assuming direct measurement of extended states,
-    # the Jacobian would look like this:
-    J = zeros(4, length(state))
-    
-    # Derivatives of [dx, dy, dv, d_stop] with respect to themselves are 1,
-    # indicating a direct measurement. All other derivatives are 0.
-    J[1, 6] = 1
-    J[2, 7] = 1
-    J[3, 8] = 1
-    J[4, 9] = 1
-    
+function Rot_from_quat(q)
+    qw = q[1]
+    qx = q[2]
+    qy = q[3]
+    qz = q[4]
+
+    R = [qw^2+qx^2-qy^2-qz^2 2(qx*qy-qw*qz) 2(qw*qy+qx*qz);
+         2(qx*qy+qw*qz) qw^2-qx^2+qy^2-qz^2 2(qy*qz-qw*qx);
+         2(qx*qz-qw*qy) 2(qw*qx+qy*qz) qw^2-qx^2-qy^2+qz^2]
+end
+
+function get_gps_transform()
+    # TODO load this from URDF
+    R_gps_to_body = one(RotMatrix{3, Float64})
+    t_gps_to_body = [-3.0, 1, 2.6]
+    T = [R_gps_to_body t_gps_to_body]
+end
+
+function get_body_transform(quat, loc)
+    R = Rot_from_quat(quat)
+    [R loc]
+end
+
+function h_gps(x)
+    T = get_gps_transform()
+    gps_loc_body = T*[zeros(3); 1.0]
+    xyz_body = x[1:3] # position
+    q_body = x[4:7] # quaternion
+    Tbody = get_body_transform(q_body, xyz_body)
+    xyz_gps = Tbody * [gps_loc_body; 1]
+    yaw = extract_yaw_from_quaternion(q_body)
+    meas = [xyz_gps[1:2]; yaw]
+end
+
+function jac_fx(x, Δt)
+    # Jacobian of the Ackermann steering model
+    θ = x[3]
+    v = x[4]
+    J = zeros(length(x), length(x))
+    J[1, 3] = -v * sin(θ) * Δt
+    J[1, 4] = cos(θ) * Δt
+    J[2, 3] = v * cos(θ) * Δt
+    J[2, 4] = sin(θ) * Δt
     return J
 end
 
-function h_imu(state)
-    # Assuming state = [x, y, z, ωx, ωy, ωz, vx, vy, vz, ...] where
-    # ωx, ωy, ωz: angular velocities around each axis
-    # vx, vy, vz: velocities along each axis
+function Jac_h_gps(x)
+    T = get_gps_transform()
+    gps_loc_body = T*[zeros(3); 1.0]
+    xyz_body = x[1:3] # position
+    q_body = x[4:7] # quaternion
+    Tbody = get_body_transform(q_body, xyz_body)
+    xyz_gps = Tbody * [gps_loc_body; 1]
+    yaw = extract_yaw_from_quaternion(q_body)
+    #meas = [xyz_gps[1:2]; yaw]
+    J = zeros(3, 13)
+    (J_Tbody_xyz, J_Tbody_q) = J_Tbody(x)
+    for i = 1:3
+        J[1:2,i] = (J_Tbody_xyz[i]*[gps_loc_body; 1])[1:2]
+    end
+    for i = 1:4
+	J[1:2,3+i] = (J_Tbody_q[i]*[gps_loc_body; 1])[1:2]
+    end
+    w = q_body[1]
+    x = q_body[2]
+    y = q_body[3]
+    z = q_body[4]
+    J[3,4] = -(2 * z * (-1 + 2 * (y^2 + z^2)))/(4 * (x * y + w * z)^2 + (1 - 2 * (y^2 + z^2))^2)
+    J[3,5] = -(2 * y * (-1 + 2 * (y^2 + z^2)))/(4 * (x * y + w * z)^2 + (1 - 2 * (y^2 + z^2))^2)
+    J[3,6] = (2 * (x + 2 * x * y^2 + 4 * w * y * z - 2 * x * z^2))/(1 + 4 * y^4 + 8 * w * x * y * z + 4 * (-1 + w^2) * z^2 + 4 * z^4 + 4 * y^2 * (-1 + x^2 + 2 * z^2))
+    J[3,7] = (2 * (w - 2 * w * y^2 + 4 * x * y * z + 2 * w * z^2))/(1 + 4 * y^4 + 8 * w * x * y * z + 4 * (-1 + w^2) * z^2 + 4 * z^4 + 4 * y^2 * (-1 + x^2 + 2 * z^2))
+    J
+end
 
-    # Extract linear velocity components
-    vx = state[7]
-    vy = state[8]
-    vz = state[9]
+function h_imu(state::Vector{Float64})
+    # Assuming state vector layout is:
+    # [x, y, z, qx, qy, qz, qw, vx, vy, vz, ωx, ωy, ωz]
 
-    # Extract angular velocity components
-    ωx = state[4]
-    ωy = state[5]
-    ωz = state[6]
+    # Extract linear and angular velocities from the state
+    linear_velocity = state[8:10]  # vx, vy, vz
+    angular_velocity = state[11:13]  # ωx, ωy, ωz
 
-    # Return the 6-dimensional vector representing IMU measurements
-    # [vx, vy, vz, ωx, ωy, ωz]
-    return [vx, vy, vz, ωx, ωy, ωz]
+    # Return the concatenation of linear and angular velocities as the measurement vector
+    return [linear_velocity; angular_velocity]
 end
 
 
-function h_gps(state::Vector{Float64})
-    # Assuming state = [x, y, θ, v, ϕ, ...]
-    # And GPS measures x, y position
-    return state[1:2]  # Return the predicted GPS measurement (x, y position)
-end
+function jac_h_imu(state::Vector{Float64})
+    # Assuming state vector layout is:
+    # [x, y, z, qx, qy, qz, qw, vx, vy, vz, ωx, ωy, ωz]
 
-
-function Jac_h_imu(state)
-    # Assuming the state vector layout from h_imu function
-    # The size of J is 6xN, where N is the number of elements in the state vector
+    # Initialize the Jacobian matrix for IMU measurements
+    # IMU measures 3 linear velocities and 3 angular velocities
     J = zeros(6, length(state))
 
-    # Map the direct relationship of the state components to the IMU measurements
-    # For linear velocities
-    J[1, 7] = 1  # vx
-    J[2, 8] = 1  # vy
-    J[3, 9] = 1  # vz
+    # The IMU measures linear velocity (vx, vy, vz) directly:
+    J[1, 8] = 1  # derivative of vx measurement with respect to vx state
+    J[2, 9] = 1  # derivative of vy measurement with respect to vy state
+    J[3, 10] = 1 # derivative of vz measurement with respect to vz state
 
-    # For angular velocities
-    J[4, 4] = 1  # ωx
-    J[5, 5] = 1  # ωy
-    J[6, 6] = 1  # ωz
+    # The IMU measures angular velocity (ωx, ωy, ωz) directly:
+    J[4, 11] = 1  # derivative of ωx measurement with respect to ωx state
+    J[5, 12] = 1  # derivative of ωy measurement with respect to ωy state
+    J[6, 13] = 1  # derivative of ωz measurement with respect to ωz state
 
     return J
 end
 
 
-function Jac_h_gps(state::Vector{Float64})
-    # Create a matrix filled with zeros
-    J = zeros(2, length(state))
-    
-    # The derivative of the GPS measurement (x, y) with respect to the position (x, y) is 1
-    J[1, 1] = 1  # Partial derivative of x position measurement with respect to x state
-    J[2, 2] = 1  # Partial derivative of y position measurement with respect to y state
-    
-    return J
+function ekf_predict(ekf::ExtendedKalmanFilter, Δt::Float64)
+    new_state = f_ackermann(ekf.state, Δt)
+    Fx = jac_fx(new_state, Δt)
+    new_covariance = Fx * ekf.covariance * Fx' + ekf.process_noise
+    return ExtendedKalmanFilter(new_state, new_covariance, ekf.process_noise, ekf.measurement_noise_gps, ekf.measurement_noise_imu)
 end
 
-
-function process_camera_measurement(measurement::CameraMeasurement)
-    # Simplified processing; in reality, would involve more complex calculations based on camera model
-    distances = [sqrt((bbox[3] - bbox[1])^2 + (bbox[4] - bbox[2])^2) for bbox in measurement.bounding_boxes]
-    avg_distance = mean(distances)  # Example processing; real implementation depends on your application
-    return avg_distance
-end
-
-function behavior_controller(state, controls)
-    # Determine behavior based on state
-    if approaching_stop_sign(state)
-        controls = adjust_for_stop_sign(state, controls)
-    elseif following_vehicle(state)
-        controls = adjust_for_following_distance(state, controls)
-    else
-        controls = maintain_cruising_speed(state, controls)
-    end
-    return controls
+function ekf_update!(ekf::ExtendedKalmanFilter, measurement, measurement_function, jac_hx, measurement_noise)
+    z_pred = measurement_function(ekf.state)
+    z = measurement
+    H = jac_hx(ekf.state)
+    Y = z - z_pred
+    S = H * ekf.covariance * H' + measurement_noise
+    K = ekf.covariance * H' / S
+    ekf.state += K * Y
+    ekf.covariance = (I - K * H) * ekf.covariance
 end
 
 function ekf_initialize()
-    # Initial state vector dimension is 13 as per your setup.
-    state = zeros(13) # For [x, y, z, θ, ωx, ωy, ωz, vx, vy, vz, ...]
-    covariance = diagm(0 => ones(13))
-    process_noise = diagm(0 => 0.1 .* ones(13))
-    
-    # Adjust measurement noise matrices to reflect the correct dimensions for each sensor.
-    measurement_noise_gps = diagm(0 => [0.1, 0.1])  # GPS measures x, y, so it's 2x2.
-    measurement_noise_imu = diagm(0 => [0.1, 0.1, 0.1, 0.1, 0.1, 0.1])  # IMU is 6-dimensional.
-    measurement_noise_cam = diagm(0 => [0.1, 0.1, 0.01])  # Assuming Camera measurements, adjust as needed.
-    
-    # No general measurement_noise needed unless for a generic update, so it's either removed or specific to a case.
-    # ExtendedKalmanFilter(state, covariance, process_noise, measurement_noise_gps, measurement_noise_gps, measurement_noise_imu, measurement_noise_cam)
-    ExtendedKalmanFilter(state, covariance, process_noise, measurement_noise_gps, measurement_noise_imu, measurement_noise_cam)
+    state = zeros(13)  # Expanded state: [x, y, θ, vx, vy, vz, ωx, ωy, ωz, quaternion...]
+    covariance = diagm(0 => 0.1 * ones(13))
+    process_noise = diagm(0 => 0.1 * ones(13))
+    measurement_noise_gps = diagm(0 => [0.1, 0.1, 0.1])  # Adjusted for GPS data structure
+    measurement_noise_imu = diagm(0 => 0.1 * ones(6))  # IMU measures 6 states
+    ExtendedKalmanFilter(state, covariance, process_noise, measurement_noise_gps, measurement_noise_imu)
 end
 
-
-function ekf_predict(ekf::ExtendedKalmanFilter, u::Vector{Float64}, Δt::Float64)
-    new_state = f_ackermann(ekf.state, u, Δt)
-    Fx = Jac_x_f(new_state, Δt) # You'll need to implement or adjust Jac_x_f accordingly
-    new_covariance = Fx * ekf.covariance * Fx' + ekf.process_noise
-    return ExtendedKalmanFilter(new_state, new_covariance, ekf.process_noise, ekf.measurement_noise_gps, ekf.measurement_noise_imu, ekf.measurement_noise_cam)
-end
-
-function ekf_update!(ekf::ExtendedKalmanFilter, measurement)
-    if isa(measurement, GPSMeasurement)
-        H_gps = Jac_h_gps(ekf.state)
-        z_pred_gps = h_gps(ekf.state)
-        gps_measurement = [measurement.lat, measurement.long]  # Assuming lat and long are properties
-
-        @info H_gps
-        @info z_pred_gps
-        @info z_gps
-        @info ekf.measurement_noise_gps
-        
-        # Perform the update calculations
-        Y = gps_measurement - z_pred_gps
-        S = H_gps * ekf.covariance * H_gps' + ekf.measurement_noise_gps
-        K = ekf.covariance * H_gps' / S
-        new_state = ekf.state + K * Y
-        new_covariance = (I - K * H_gps) * ekf.covariance
-        
-        return ExtendedKalmanFilter(new_state, new_covariance, ekf.process_noise, ekf.measurement_noise_gps, ekf.measurement_noise_imu, ekf.measurement_noise_cam)
-    elseif isa(measurement, IMUMeasurement)
-        
-        # IMU update logic
-        H_imu = Jac_h_imu(ekf.state)  # Jacobian of the IMU measurement function
-        z_pred_imu = h_imu(ekf.state)  # Predicted IMU measurement
-        z_imu = [measurement.linear_vel; measurement.angular_vel]  # Actual IMU measurement
-
-        @info H_imu
-        @info z_pred_imu
-        @info z_imu
-        @info ekf.measurement_noise_imu
-
-        # Instead of update_ekf!, directly perform the update calculations here
-        Y = z_imu - z_pred_imu  # Measurement residual
-        S = H_imu * ekf.covariance * H_imu' + ekf.measurement_noise_imu  # Residual covariance
-        K = ekf.covariance * H_imu' / S  # Kalman gain
-        new_state = ekf.state + K * Y  # State update
-        new_covariance = (I - K * H_imu) * ekf.covariance  # Covariance update
-
-        return ExtendedKalmanFilter(new_state, new_covariance, ekf.process_noise, ekf.measurement_noise_gps, ekf.measurement_noise_imu, ekf.measurement_noise_cam)
-    elseif isa(measurement, CameraMeasurement)
-        # Camera update logic
-        # Again, hypothetical function calls
-        # H_camera = Jac_h_camera(ekf.state) # Jacobian of the camera measurement function
-        # z_pred_camera = h_camera(ekf.state) # Predicted camera measurement
-        # # Camera measurement conversion is more complex, likely involving bounding box processing
-        # z_camera = process_camera_measurement(measurement) # You need to implement this function
-        # update_ekf!(ekf, H_camera, z_camera, z_pred_camera, ekf.measurement_noise_camera)
-    elseif isa(measurement, GroundTruthMeasurement)
-        # Ground truth update logic
-        # Ground truth can be used for validation or as a direct state update in some cases
-        # Direct state update from ground truth is not typical for EKF but shown here for completeness
-        # ekf.state = [measurement.position; measurement.orientation; measurement.velocity; measurement.angular_velocity]
-        # You might not directly use ground truth this way in a real system, but rather for validation
-    end
-end
-
-# Generalized EKF update function to reduce repetition
-function update_ekf!(ekf::ExtendedKalmanFilter, H, z, z_pred, measurement_noise)
-    Y = z - z_pred # Measurement residual
-    S = H * ekf.covariance * H' + measurement_noise # Residual covariance
-    K = ekf.covariance * H' / S # Kalman gain
-    ekf.state += K * Y # State update
-    ekf.covariance = (I - K * H) * ekf.covariance # Covariance update
-end
-
-# Main localization loop that utilizes the EKF with sensor data
-function run_localization_loop()
-    ekf = ekf_initialize()
+function run_localization_loop(ekf)
+    Δt = 0.1  # time step
     while true
-        Δt = 10 # Determine timestep based on system requirements
-        ekf_predict!(ekf, Δt)
-        # Fetch sensor measurements
-        for measurement in # Sensor measurement fetching logic
-            ekf_update!(ekf, measurement)
-        end
-        # Here, ekf.state contains the updated vehicle state
-        # This can be used for vehicle control, navigation, etc.
+        ekf = ekf_predict(ekf, Δt)
+        # Example usage for GPS:
+        gps_measurement = [get_gps_x(), get_gps_y()]  # Fetch GPS data
+        ekf_update!(ekf, gps_measurement, h_gps, Jac_h_gps, ekf.measurement_noise_gps)
+        # Use ekf.state for vehicle control and navigation
     end
 end
