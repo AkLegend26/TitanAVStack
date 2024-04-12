@@ -156,10 +156,13 @@ function keyboard_client(host::IPAddr=IPv4(0), port=4444; v_step = 1.0, s_step =
         catch e
             @error "Failed to take from result_channel: $e"
         end
+    end
     
     target_velocity = 0.0
     steering_angle = 0.0
     controlled = true
+    # Define Δt for 10 updates per second
+    Δt = 0.1  # seconds
     
     client_info_string = 
         "********************
@@ -168,6 +171,8 @@ function keyboard_client(host::IPAddr=IPv4(0), port=4444; v_step = 1.0, s_step =
     @info client_info_string
     while controlled && isopen(socket)
         key = get_c()
+        control_changed = false  # Flag to track if control inputs have changed
+
         if key == 'q'
             # terminate vehicle
             controlled = false
@@ -176,25 +181,46 @@ function keyboard_client(host::IPAddr=IPv4(0), port=4444; v_step = 1.0, s_step =
             @info "Terminating Keyboard Client."
         elseif key == 'i'
             # increase target velocity
+            a = v_step / Δt  # Compute acceleration
+            δ = 0  # No change in steering angle for this action
             target_velocity += v_step
             @info "Target velocity: $target_velocity"
+            control_changed = true
         elseif key == 'k'
+            a = - v_step / Δt  # Compute acceleration
+            δ = 0  # No change in steering angle for this action
             # decrease forward force
             target_velocity -= v_step
             @info "Target velocity: $target_velocity"
+            control_changed = true;
         elseif key == 'j'
+            a = 0  # No change in velocity for this action
+            δ = s_step / Δt  # Compute change in steering angle
             # increase steering angle
             steering_angle += s_step
             @info "Target steering angle: $steering_angle"
+            control_changed = true;
         elseif key == 'l'
+            a = 0  # No change in velocity for this action
+            δ = - s_step / Δt  # Compute change in steering angle
             # decrease steering angle
             steering_angle -= s_step
             @info "Target steering angle: $steering_angle"
+            control_changed = true;
         end
-        cmd = (steering_angle, target_velocity, controlled)
-        serialize(socket, cmd)
+        if control_changed
+            u = [a, δ]
+            ekf1 = ekf_predict(ekf1, u, Δt)
+
+            cmd = (steering_angle, target_velocity, controlled)
+            serialize(socket, cmd)
+
+            estimated_position = ekf1.state[1:2]  # Assuming state vector format matches EKF setup
+            position_error = norm(estimated_position - gt_position)
+            @info "Position Error: $position_error"
+            @info "Measurements received: $num_gt gt; $num_cam cam; $num_imu imu; $num_gps gps"
+        end
     end
-end
 end
         
             

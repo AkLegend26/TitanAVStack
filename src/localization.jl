@@ -163,8 +163,8 @@ function ekf_initialize()
 end
 
 
-function ekf_predict(ekf::ExtendedKalmanFilter, Δt::Float64)
-    new_state = f_ackermann(ekf.state, Δt) # Assuming you have a control input u, pass it here
+function ekf_predict(ekf::ExtendedKalmanFilter, u::Vector{Float64}, Δt::Float64)
+    new_state = f_ackermann(ekf.state, u, Δt)
     Fx = Jac_x_f(new_state, Δt) # You'll need to implement or adjust Jac_x_f accordingly
     new_covariance = Fx * ekf.covariance * Fx' + ekf.process_noise
     return ExtendedKalmanFilter(new_state, new_covariance, ekf.process_noise, ekf.measurement_noise_gps, ekf.measurement_noise_imu, ekf.measurement_noise_cam)
@@ -190,7 +190,6 @@ function ekf_update!(ekf::ExtendedKalmanFilter, measurement)
         
         return ExtendedKalmanFilter(new_state, new_covariance, ekf.process_noise, ekf.measurement_noise_gps, ekf.measurement_noise_imu, ekf.measurement_noise_cam)
     elseif isa(measurement, IMUMeasurement)
-        @info "imu measured"
         
         # IMU update logic
         H_imu = Jac_h_imu(ekf.state)  # Jacobian of the IMU measurement function
