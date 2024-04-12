@@ -43,7 +43,8 @@ goal = Goal(10.0, 10.0)  # Goal position
 
 # Compute the next command based on the current state and goal
 #next_command = compute_next_command(current_state, goal)
-
+steering_angle = 0
+velocity = 0
 # Print the command (for demonstration; in practice, you would send this command to the vehicle control system)
 println("Steering Angle: $(steering_angle), Velocity: $(velocity)")
 

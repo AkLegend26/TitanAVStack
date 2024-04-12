@@ -1,5 +1,3 @@
-include("decision_making.jl")
-
 # Sample function to print a segment and its direct connections
 function print_segment_connections(segment_id, all_segs)
     segment = all_segs[segment_id]
@@ -18,14 +16,12 @@ end
 # Assuming `all_segs` is your map's segments dictionary
 # print_all_connections(all_segs)
 
-using LinearAlgebra  # For distance calculation
-
 # Simple heuristic: straight-line distance between segment midpoints
-function heuristic_cost(seg_a::Goal, seg_b::Goal)
-    mid_a = (seg_a.lane_boundaries[1].pt_a + seg_a.lane_boundaries[end].pt_b) / 2
-    mid_b = (seg_b.lane_boundaries[1].pt_a + seg_b.lane_boundaries[end].pt_b) / 2
-    return norm(mid_a - mid_b)
-end
+# function heuristic_cost(seg_a::Goal, seg_b::Goal)
+#     mid_a = (seg_a.lane_boundaries[1].pt_a + seg_a.lane_boundaries[end].pt_b) / 2
+#     mid_b = (seg_b.lane_boundaries[1].pt_a + seg_b.lane_boundaries[end].pt_b) / 2
+#     return norm(mid_a - mid_b)
+# end
 
 # Main A* function skeleton
 function a_star_search(all_segs, start_id, goal_id)
@@ -35,7 +31,7 @@ function a_star_search(all_segs, start_id, goal_id)
     cameFrom = Dict()
 
     gScore = Dict{Int, Float64}(start_id => 0)
-    fScore = Dict{Int, Float64}(start_id => heuristic_cost(all_segs[start_id], all_segs[goal_id]))
+    fScore = Dict{Int, Float64}(start_id => 0)
 
     while !isempty(openSet)
         current_id, _ = dequeue!(openSet)
@@ -52,7 +48,7 @@ function a_star_search(all_segs, start_id, goal_id)
             if !haskey(gScore, child_id) || tentative_gScore < gScore[child_id]
                 cameFrom[child_id] = current_id
                 gScore[child_id] = tentative_gScore
-                fScore[child_id] = gScore[child_id] + heuristic_cost(all_segs[child_id], all_segs[goal_id])
+                fScore[child_id] = gScore[child_id] + 0
                 if !haskey(openSet, child_id)
                     enqueue!(openSet, child_id, fScore[child_id])
                 end
