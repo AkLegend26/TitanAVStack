@@ -3,7 +3,7 @@ struct ExtendedKalmanFilter
     state::Vector{Float64} # Vehicle state: position, quaternion, velocity, angular velocity
     covariance::Matrix{Float64} # State covariance matrix
     process_noise::Matrix{Float64} # Process noise covariance
-    measurement_noise::Matrix{Float64} # Measurement noise covariance
+    # measurement_noise::Matrix{Float64} # Measurement noise covariance
     measurement_noise_gps::Matrix{Float64}
     measurement_noise_imu::Matrix{Float64}
     measurement_noise_cam::Matrix{Float64}
@@ -147,54 +147,69 @@ function behavior_controller(state, controls)
 end
 
 function ekf_initialize()
-    # Initial state and covariance matrix setup
-    state = zeros(13) # Example initialization
+    # Initial state vector dimension is 13 as per your setup.
+    state = zeros(13) # For [x, y, z, θ, ωx, ωy, ωz, vx, vy, vz, ...]
     covariance = diagm(0 => ones(13))
     process_noise = diagm(0 => 0.1 .* ones(13))
-    measurement_noise = diagm(0 => [0.1, 0.1, 0.01]) # GPS measurement noise as an example
-    measurement_noise_gps = diagm(0 => [0.1, 0.1, 0.01]) 
-    measurement_noise_imu = diagm(0 => [0.1, 0.1, 0.01]) 
-    measurement_noise_cam = diagm(0 => [0.1, 0.1, 0.01]) 
-    ExtendedKalmanFilter(state, covariance, process_noise, measurement_noise, measurement_noise_gps, measurement_noise_imu, measurement_noise_cam)
+    
+    # Adjust measurement noise matrices to reflect the correct dimensions for each sensor.
+    measurement_noise_gps = diagm(0 => [0.1, 0.1])  # GPS measures x, y, so it's 2x2.
+    measurement_noise_imu = diagm(0 => [0.1, 0.1, 0.1, 0.1, 0.1, 0.1])  # IMU is 6-dimensional.
+    measurement_noise_cam = diagm(0 => [0.1, 0.1, 0.01])  # Assuming Camera measurements, adjust as needed.
+    
+    # No general measurement_noise needed unless for a generic update, so it's either removed or specific to a case.
+    # ExtendedKalmanFilter(state, covariance, process_noise, measurement_noise_gps, measurement_noise_gps, measurement_noise_imu, measurement_noise_cam)
+    ExtendedKalmanFilter(state, covariance, process_noise, measurement_noise_gps, measurement_noise_imu, measurement_noise_cam)
 end
 
-function ekf_predict!(ekf::ExtendedKalmanFilter, Δt::Float64)
-    # Use the rigid_body_dynamics as the process model
-    ekf.state = f(ekf.state, Δt)
-    Fx = Jac_x_f(ekf.state, Δt) # Jacobian of the process model
-    ekf.covariance = Fx * ekf.covariance * Fx' + ekf.process_noise
+
+function ekf_predict(ekf::ExtendedKalmanFilter, Δt::Float64)
+    new_state = f_ackermann(ekf.state, Δt) # Assuming you have a control input u, pass it here
+    Fx = Jac_x_f(new_state, Δt) # You'll need to implement or adjust Jac_x_f accordingly
+    new_covariance = Fx * ekf.covariance * Fx' + ekf.process_noise
+    return ExtendedKalmanFilter(new_state, new_covariance, ekf.process_noise, ekf.measurement_noise_gps, ekf.measurement_noise_imu, ekf.measurement_noise_cam)
 end
 
 function ekf_update!(ekf::ExtendedKalmanFilter, measurement)
     if isa(measurement, GPSMeasurement)
-        # Convert GPS lat/long to local map frame if necessary
-        # Here, assume lat and long are already in the format of x and y
-        @info "gps measured"
-        gps_position = [measurement.lat, measurement.long]  # Actual GPS measurement
-        
-        H_gps = Jac_h_gps(ekf.state)  # Jacobian of the GPS measurement model
-        z_pred_gps = h_gps(ekf.state)  # Predicted GPS measurement
+        H_gps = Jac_h_gps(ekf.state)
+        z_pred_gps = h_gps(ekf.state)
+        gps_measurement = [measurement.lat, measurement.long]  # Assuming lat and long are properties
 
         @info H_gps
-        @info gps_position
         @info z_pred_gps
-        @info ekf.measurement_noise_imu
+        @info z_gps
+        @info ekf.measurement_noise_gps
         
-        update_ekf!(ekf, H_gps, gps_position, z_pred_gps, ekf.measurement_noise_gps)  # Update the EKF
+        # Perform the update calculations
+        Y = gps_measurement - z_pred_gps
+        S = H_gps * ekf.covariance * H_gps' + ekf.measurement_noise_gps
+        K = ekf.covariance * H_gps' / S
+        new_state = ekf.state + K * Y
+        new_covariance = (I - K * H_gps) * ekf.covariance
+        
+        return ExtendedKalmanFilter(new_state, new_covariance, ekf.process_noise, ekf.measurement_noise_gps, ekf.measurement_noise_imu, ekf.measurement_noise_cam)
     elseif isa(measurement, IMUMeasurement)
         @info "imu measured"
+        
         # IMU update logic
-        # Hypothetical function calls (you need to implement these based on your system's specifics)
-        H_imu = Jac_h_imu(ekf.state) # Jacobian of the IMU measurement function
-        z_pred_imu = h_imu(ekf.state) # Predicted IMU measurement
-        z_imu = [measurement.linear_vel; measurement.angular_vel] # Actual IMU measurement
+        H_imu = Jac_h_imu(ekf.state)  # Jacobian of the IMU measurement function
+        z_pred_imu = h_imu(ekf.state)  # Predicted IMU measurement
+        z_imu = [measurement.linear_vel; measurement.angular_vel]  # Actual IMU measurement
 
         @info H_imu
-        @info z_imu
         @info z_pred_imu
+        @info z_imu
         @info ekf.measurement_noise_imu
 
-        update_ekf!(ekf, H_imu, z_imu, z_pred_imu, ekf.measurement_noise_imu) # Use a generalized update function
+        # Instead of update_ekf!, directly perform the update calculations here
+        Y = z_imu - z_pred_imu  # Measurement residual
+        S = H_imu * ekf.covariance * H_imu' + ekf.measurement_noise_imu  # Residual covariance
+        K = ekf.covariance * H_imu' / S  # Kalman gain
+        new_state = ekf.state + K * Y  # State update
+        new_covariance = (I - K * H_imu) * ekf.covariance  # Covariance update
+
+        return ExtendedKalmanFilter(new_state, new_covariance, ekf.process_noise, ekf.measurement_noise_gps, ekf.measurement_noise_imu, ekf.measurement_noise_cam)
     elseif isa(measurement, CameraMeasurement)
         # Camera update logic
         # Again, hypothetical function calls
