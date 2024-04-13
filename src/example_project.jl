@@ -43,7 +43,7 @@ function localize(gps_channel::Channel{GPSMeasurement}, imu_channel::Channel{IMU
                     take!(localization_state_channel)  # Clear the channel if full
                 end
                 put!(localization_state_channel, localized_state)
-                @info "Published updated localization state."
+                # @info "Published updated localization state."
             end
 
             sleep(0.1)  # Manage loop timing
@@ -229,7 +229,7 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
     
 
     @async localize(gps_channel, imu_channel, localization_state_channel)
-    #@async test_localization(gt_channel, localization_state_channel)
+    @async test_localization(gt_channel, localization_state_channel)
 
     #@async perception(cam_channel, localization_state_channel, perception_state_channel)
     #@async decision_making(localization_state_channel, perception_state_channel, map, socket)

@@ -175,12 +175,13 @@ function ekf_update!(ekf::ExtendedKalmanFilter, measurement, measurement_functio
     ekf.covariance = (I - K * H) * ekf.covariance
 end
 
+# shrink process_noise and measurement_noise to trust gps more
 function ekf_initialize()
     state = zeros(13)  # Expanded state: [x, y, θ, vx, vy, vz, ωx, ωy, ωz, quaternion...]
     covariance = diagm(0 => 0.1 * ones(13))
     process_noise = diagm(0 => 0.1 * ones(13))
-    measurement_noise_gps = diagm(0 => [0.1, 0.1, 0.1])  # Adjusted for GPS data structure
-    measurement_noise_imu = diagm(0 => 0.1 * ones(6))  # IMU measures 6 states
+    measurement_noise_gps = diagm(0 => [1.0, 1.0, 0.1])  # Adjusted for GPS data structure
+    measurement_noise_imu = diagm(0 => 0.001 * ones(6))  # IMU measures 6 states
     ExtendedKalmanFilter(state, covariance, process_noise, measurement_noise_gps, measurement_noise_imu)
 end
 
