@@ -10,53 +10,98 @@ struct MyPerceptionType
     field2::Float64
 end
 
-function localize(gps_channel::Channel{GPSMeasurement}, imu_channel::Channel{IMUMeasurement}, localization_state_channel::Channel{MyLocalizationType})
-    @info "Localization process started."
-    ekf = ekf_initialize()  # Initialize the EKF\
+###Running working localization code
+# function localize(gps_channel::Channel{GPSMeasurement}, imu_channel::Channel{IMUMeasurement}, localization_state_channel::Channel{MyLocalizationType})
+#     @info "Localization process started."
+#     ekf = ekf_initialize()  # Initialize the EKF\
+#     while true
+#         try
+#             if isready(gps_channel)
+#                 gps_measurement = take!(gps_channel)
+#                 gps_data = [gps_measurement.lat, gps_measurement.long, gps_measurement.heading]
+#                 ekf_update!(ekf, gps_data, h_gps, Jac_h_gps, ekf.measurement_noise_gps)
+#                 #@info "Processed GPS data: ", gps_data
+#             else
+#                 #@info "Waiting for GPS data..."
+#             end
+
+#             if isready(imu_channel)
+#                 imu_measurement = take!(imu_channel)
+#                 imu_data = [imu_measurement.linear_vel..., imu_measurement.angular_vel...]
+#                 ekf_update!(ekf, imu_data, h_imu, jac_h_imu, ekf.measurement_noise_imu)
+#                 #@info "Processed IMU data: ", imu_data
+#             else
+#                 #@info "Waiting for IMU data..."
+#             end
+
+#             if isready(gps_channel) || isready(imu_channel)
+#                 localized_state = MyLocalizationType(
+#                     [ekf.state[1], ekf.state[2]],  # Position x, y
+#                     ekf.state[3],  # Orientation (assuming θ, single scalar)
+#                     [ekf.state[4], ekf.state[5]]  # Velocity vx, vy (corrected assuming ekf.state includes these)
+#                 )
+#                 if isready(localization_state_channel)
+#                     take!(localization_state_channel)  # Clear the channel if full
+#                 end
+#                 put!(localization_state_channel, localized_state)
+#                 #@info "Published updated localization state."
+#             end
+
+#             sleep(0.1)  # Manage loop timing
+#         catch e
+#             @error "Error in localization process" exception=(e, catch_backtrace())
+#             break  # Optionally break or continue based on error severity
+#         end
+#     end
+# end
+### Above is wokring code
+
+function localize(gt_channel::Channel{GroundTruthMeasurement}, localization_state_channel::Channel{MyLocalizationType})
+    @info "Localization process started using ground truth data."
     while true
         try
-            if isready(gps_channel)
-                gps_measurement = take!(gps_channel)
-                gps_data = [gps_measurement.lat, gps_measurement.long, gps_measurement.heading]
-                ekf_update!(ekf, gps_data, h_gps, Jac_h_gps, ekf.measurement_noise_gps)
-                #@info "Processed GPS data: ", gps_data
-            else
-                #@info "Waiting for GPS data..."
-            end
+            if isready(gt_channel)
+                gt_data = take!(gt_channel)
 
-            if isready(imu_channel)
-                imu_measurement = take!(imu_channel)
-                imu_data = [imu_measurement.linear_vel..., imu_measurement.angular_vel...]
-                ekf_update!(ekf, imu_data, h_imu, jac_h_imu, ekf.measurement_noise_imu)
-                #@info "Processed IMU data: ", imu_data
-            else
-                #@info "Waiting for IMU data..."
-            end
+                # Extract necessary components from ground truth data
+                position_xy = [gt_data.position[1], gt_data.position[2]]  # Get the x, y components of position
+                velocity_xy = [gt_data.velocity[1], gt_data.velocity[2]]  # Get the x, y components of velocity
+                
+                # Assuming orientation needs to be converted from quaternion to yaw angle
+                # Here's a simple method to convert quaternion to yaw assuming quaternion is [w, x, y, z]
+                # This conversion is simplified and specific to this scenario
+                w, x, y, z = gt_data.orientation
+                yaw = atan(2.0 * (w * z + x * y), 1.0 - 2.0 * (y^2 + z^2))
 
-            if isready(gps_channel) || isready(imu_channel)
                 localized_state = MyLocalizationType(
-                    [ekf.state[1], ekf.state[2]],  # Position x, y
-                    ekf.state[3],  # Orientation (assuming θ, single scalar)
-                    [ekf.state[4], ekf.state[5]]  # Velocity vx, vy (corrected assuming ekf.state includes these)
+                    position_xy,   # Ground truth position [x, y]
+                    yaw,           # Computed yaw from quaternion
+                    velocity_xy    # Ground truth velocity [vx, vy]
                 )
+
+                # Ensure the localization state channel is not full before putting new data
                 if isready(localization_state_channel)
                     take!(localization_state_channel)  # Clear the channel if full
                 end
-                put!(localization_state_channel, localized_state)
-                # @info "Published updated localization state."
-            end
 
-            sleep(0.1)  # Manage loop timing
+                put!(localization_state_channel, localized_state)
+                @info "Published ground truth localization state."
+            else
+                sleep(0.1)  # Adjust the timing based on your system's needs
+            end
         catch e
-            @error "Error in localization process" exception=(e, catch_backtrace())
+            @error "Error in localization process using ground truth data" exception=(e, catch_backtrace())
             break  # Optionally break or continue based on error severity
         end
     end
 end
 
+
 function perception(cam_meas_channel, localization_state_channel, perception_state_channel)
+    @info "Perception..."
     # set up stuff
     while true
+        sleep(0.001)
         fresh_cam_meas = []
         while isready(cam_meas_channel)
             meas = take!(cam_meas_channel)
@@ -73,26 +118,34 @@ function perception(cam_meas_channel, localization_state_channel, perception_sta
         end
         put!(perception_state_channel, perception_state)
     end
+    @info "Perception out!!"
 end
 
-function decision_making(localization_state_channel, perception_state_channel, map, target_road_segment_id, socket)
+function decision_making(localization_state_channel, map_segments, socket, target_road_segment_id)
+    @info "Decision making task started..."
     while true
-        latest_localization_state = fetch(localization_state_channel)
-        latest_perception_state = fetch(perception_state_channel)
-
-        # Placeholder for current vehicle state and goal definition
-        current_state = VehicleState(latest_localization_state.field1, latest_localization_state.field2, 0.0)  # Adjust as necessary
-        goal = Goal(10.0,10.0)  # Define how you determine the goal (10,10 for now just for testing)
-
-        # Pathfinding to determine route
-        path = a_star_search(map, current_state, goal)  # Adjust this call as necessary
-        waypoints = path_to_waypoints(path, map)  # Convert path to waypoints
-        
-        # Iterate over waypoints to guide vehicle
-        for waypoint in waypoints
-            command = compute_next_command(current_state, waypoint)  # Generate command for each waypoint
-            serialize(socket, VehicleCommand(command[1], command[2], true))  # Adjust as necessary to apply command
-            # Update current_state based on simulation or real-world feedback
+        try
+            if isready(localization_state_channel)
+                latest_localization_state = take!(localization_state_channel)
+                @info "Finding current segment..."
+                current_segment_id = find_current_segment(latest_localization_state.position, map_segments)
+                if current_segment_id == -1
+                    @error "No segment found for position" position=latest_localization_state.position
+                    continue  # Skip to the next iteration if no segment is found
+                end
+                @info "Current segment found" segment_id=current_segment_id
+                @info "Calculating shortest path..."
+                path = shortest_path(current_segment_id, target_road_segment_id, map_segments)
+                @info "Navigating through path...", length(path)
+                for segment_id in path
+                    segment = map_segments[segment_id]
+                    navigate_segment(segment, latest_localization_state, socket)
+                end
+            else
+                sleep(0.1)  # Sleep to prevent tight loop if channel is empty
+            end
+        catch e
+            @error "An error occurred during the decision making process" exception=(e, catch_backtrace())
         end
     end
 end
@@ -173,7 +226,8 @@ function test_localization(gt_channel, localization_state_channel)
 end
 
 function my_client(host::IPAddr=IPv4(0), port=4444)
-    @info "TITANSNSNSNNS"
+    @info "hello"
+
     socket = Sockets.connect(host, port)
     map_segments = VehicleSim.training_map()
     
@@ -188,8 +242,22 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
     localization_state_channel = Channel{MyLocalizationType}(1)
     perception_state_channel = Channel{MyPerceptionType}(1)
 
-    target_map_segment = 0 # (not a valid segment, will be overwritten by message)
+    target_velocity = 0.0
+    steering_angle = 0.0
+    controlled = true
+
+    client_info_string = 
+        "********************
+      TITANS REVING
+      ********************"
+
+    @info client_info_string
+
+    target_map_segment = 0 # (not a valid segment, will be overwritten by message) #del
     ego_vehicle_id = 0 # (not a valid id, will be overwritten by message. This is used for discerning ground-truth messages)
+    
+    @info gps_channel, imu_channel
+
 
     errormonitor(@async while true
         # This while loop reads to the end of the socket stream (makes sure you
@@ -197,6 +265,7 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
         sleep(0.001)
         local measurement_msg
         received = false
+
         while true
             @async eof(socket)
             if bytesavailable(socket) > 0
@@ -225,12 +294,12 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
             end
         end
     end)
-
+    targets = 51
     
-
-    @async localize(gps_channel, imu_channel, localization_state_channel)
-    @async test_localization(gt_channel, localization_state_channel)
+    @async localize(gt_channel, localization_state_channel)
+    #@async localize(gps_channel, imu_channel, localization_state_channel)
+    #@async test_localization(gt_channel, localization_state_channel)
 
     #@async perception(cam_channel, localization_state_channel, perception_state_channel)
-    #@async decision_making(localization_state_channel, perception_state_channel, map, socket)
+    @async decision_making(localization_state_channel, map_segments, socket, targets)
 end

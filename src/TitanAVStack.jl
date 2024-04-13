@@ -7,6 +7,7 @@ using LinearAlgebra
 using StaticArrays
 using RigidBodyDynamics
 using Rotations
+using DataStructures
 
 include("Routing.jl")
 include("control.jl")
