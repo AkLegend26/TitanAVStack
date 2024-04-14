@@ -4,10 +4,11 @@ using VehicleSim
 using Sockets
 using Serialization
 using LinearAlgebra
+using DataStructures
 using StaticArrays
 using RigidBodyDynamics
 using Rotations
-using DataStructures
+using PolygonInbounds
 
 include("Routing.jl")
 include("control.jl")

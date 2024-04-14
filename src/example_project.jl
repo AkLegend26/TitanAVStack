@@ -1,7 +1,8 @@
 struct MyLocalizationType
-    position::Vector{Float64}  # [x, y]
-    orientation::Float64       # θ
-    velocity::Vector{Float64}  # [vx, vy]
+    position::SVector{3, Float64}  # [x, y]
+    orientation::SVector{4, Float64}      # θ
+    velocity::SVector{3, Float64}  # [vx, vy]
+    angular_velocity::SVector{3, Float64} 
 end
 
 
@@ -63,20 +64,16 @@ function localize(gt_channel::Channel{GroundTruthMeasurement}, localization_stat
             if isready(gt_channel)
                 gt_data = take!(gt_channel)
 
-                # Extract necessary components from ground truth data
-                position_xy = [gt_data.position[1], gt_data.position[2]]  # Get the x, y components of position
-                velocity_xy = [gt_data.velocity[1], gt_data.velocity[2]]  # Get the x, y components of velocity
-                
-                # Assuming orientation needs to be converted from quaternion to yaw angle
-                # Here's a simple method to convert quaternion to yaw assuming quaternion is [w, x, y, z]
-                # This conversion is simplified and specific to this scenario
-                w, x, y, z = gt_data.orientation
-                yaw = atan(2.0 * (w * z + x * y), 1.0 - 2.0 * (y^2 + z^2))
+                position = gt_data.position  # 3D position [x, y, z]
+                velocity = gt_data.velocity  # 3D velocity [vx, vy, vz]
+                orientation = gt_data.orientation  # Quaternion [w, x, y, z]
+                angular_velocity = gt_data.angular_velocity  # Angular velocity [omega_x, omega_y, omega_z]
 
                 localized_state = MyLocalizationType(
-                    position_xy,   # Ground truth position [x, y]
-                    yaw,           # Computed yaw from quaternion
-                    velocity_xy    # Ground truth velocity [vx, vy]
+                    position,        # Ground truth position
+                    orientation,     # Quaternion orientation
+                    velocity,        # Ground truth velocity
+                    angular_velocity # Ground truth angular velocity
                 )
 
                 # Ensure the localization state channel is not full before putting new data
@@ -126,14 +123,26 @@ function decision_making(localization_state_channel, map_segments, socket, targe
     while true
         try
             if isready(localization_state_channel)
-                latest_localization_state = take!(localization_state_channel)
+                latest_localization_state = fetch(localization_state_channel)
                 @info "Finding current segment..."
-                current_segment_id = find_current_segment(latest_localization_state.position, map_segments)
+
+                # Extract position and orientation
+                position = latest_localization_state.position[1:2] 
+                @info position
+                yaw = extract_yaw_from_quaternion(latest_localization_state.orientation)
+                #adjusted_position = adjust_position_based_on_yaw(position, yaw)
+                #@info adjusted_position
+                # Now find the current segment using the adjusted position
+                current_segment_id = find_current_segment(position, map_segments)
+                @info current_segment_id
+                sleep(5)
                 if current_segment_id == -1
                     @error "No segment found for position" position=latest_localization_state.position
+                    sleep(1)
                     continue  # Skip to the next iteration if no segment is found
                 end
                 @info "Current segment found" segment_id=current_segment_id
+                sleep(1)
                 @info "Calculating shortest path..."
                 path = shortest_path(current_segment_id, target_road_segment_id, map_segments)
                 @info "Navigating through path...", length(path)
@@ -150,11 +159,9 @@ function decision_making(localization_state_channel, map_segments, socket, targe
     end
 end
 
-
 function isfull(ch::Channel)
     length(ch.data) ≥ ch.sz_max
 end
-
 
 function quaternion_angle_difference(q1::SVector{4, Float64}, q2::SVector{4, Float64})
     # Normalize the quaternions to ensure they represent valid rotations
@@ -230,7 +237,8 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
 
     socket = Sockets.connect(host, port)
     map_segments = VehicleSim.training_map()
-    
+    @info map_segments
+
     msg = deserialize(socket) # Visualization info
     @info msg
 
