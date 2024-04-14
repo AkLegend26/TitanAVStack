@@ -2,11 +2,7 @@
 
 julia_version = "1.10.2"
 manifest_format = "2.0"
-<<<<<<< HEAD
-project_hash = "1cc3742839d872dbaf7aa98c858b72e3f2e67c14"
-=======
-project_hash = "527f90b23e91f6d7ca00cd46ae0f3a034bf4e7eb"
->>>>>>> 7848d9e1c39286e6a3f5041a8fc83ca02e953e05
+project_hash = "32ce9052261c08890531fc2ea731b535fa03a0db"
 
 [[deps.Adapt]]
 deps = ["LinearAlgebra", "Requires"]
@@ -1005,6 +1001,11 @@ deps = ["BitTwiddlingConvenienceFunctions", "CPUSummary", "IfElse", "Static", "T
 git-tree-sha1 = "43883d15c7cf16f340b9367c645cf88372f55641"
 uuid = "1d0040c9-8b98-4ee7-8388-3f51789ca0ad"
 version = "0.1.13"
+
+[[deps.PolygonInbounds]]
+git-tree-sha1 = "8d50c96f4ba5e1e2fd524116b4ef97b29d5f77da"
+uuid = "e4521ec6-8c1d-418e-9da2-b3bc4ae105d6"
+version = "0.2.0"
 
 [[deps.PreallocationTools]]
 deps = ["Adapt", "ArrayInterfaceCore", "ForwardDiff", "Requires"]

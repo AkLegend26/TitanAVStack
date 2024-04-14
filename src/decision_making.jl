@@ -1,30 +1,145 @@
-# Helper function to calculate the distance from a point to a line segment
-function point_to_segment_distance(point, segment)
-    @info "Calculating point-to-segment distance"
-    try
-        p = point
-        a, b = segment.pt_a, segment.pt_b
-        @info "Segment start (pt_a): $a, end (pt_b): $b"  # Debugging info
-        if a == b
-            distance = norm(p - a)
-            @info "Distance from point to segment (single point): $distance"
-            return distance
+function find_current_segment(position, map_segments)
+    @info "Finding segment for position: $position"
+    best_segment_id = -1
+    closest_distance = Inf
+
+    for (id, segment) in map_segments
+        @info "before calling check seg"
+        within, distance = check_segment(position, segment)
+        @info "after calling check seg"
+        @info "Checked segment $id, within: $within, distance: $distance"
+        if within && distance < closest_distance
+            closest_distance = distance
+            best_segment_id = id
         end
-        ab = b - a
-        ap = p - a
-        t = dot(ap, ab) / dot(ab, ab)
-        t = clamp(t, 0.0, 1.0)
-        closest = a + t * ab
-        distance = norm(p - closest)
-        @info "Closest point on segment: $closest"
-        @info "Distance from point to segment: $distance"
-        return distance
-    catch e
-        @error "Failed to calculate point-to-segment distance" exception=(e, catch_backtrace())
-        return Inf
+    end
+
+    if best_segment_id != -1
+        @info "Segment found: $best_segment_id"
+        return best_segment_id
+    else
+        @error "No current segment found for position: $position"
+        return -1
     end
 end
 
+function check_segment(position, segment)
+    @info "inside checking function"
+    if segment.lane_boundaries[1].curvature != 0
+        return check_curved_segment(position, segment)
+    else
+        return check_straight_segment(position, segment.lane_boundaries)
+    end
+end
+
+function check_straight_segment(position, boundaries)
+    @info "in straight seg"
+    min_x = Inf
+    max_x = -Inf
+    min_y = Inf
+    max_y = -Inf
+
+    for boundary in boundaries
+        min_x = min(min_x, boundary.pt_a[1], boundary.pt_b[1])
+        max_x = max(max_x, boundary.pt_a[1], boundary.pt_b[1])
+        min_y = min(min_y, boundary.pt_a[2], boundary.pt_b[2])
+        max_y = max(max_y, boundary.pt_a[2], boundary.pt_b[2])
+    end
+
+    within = (min_x <= position[1]) && (position[1] <= max_x) && (min_y <= position[2]) && (position[2] <= max_y)
+    distance = if within 
+        0 
+    else 
+        minimum([abs(position[1] - min_x), abs(position[1] - max_x), abs(position[2] - min_y), abs(position[2] - max_y)])
+    end
+    return within, distance
+end
+
+
+function check_curved_segment(position, segment)
+    @info "ub cyrved seg"
+    boundary = segment.lane_boundaries[1]  
+    center = calculate_curve_center(boundary)
+    radius = calculate_curve_radius(boundary)
+    pt_a = boundary.pt_a
+    pt_b = boundary.pt_b
+
+    angle = atan2(position[2] - center[2], position[1] - center[1])
+    distance = norm(position - center)
+
+    within_angle = is_within_angle(pt_a, pt_b, center, angle)
+    within_radius = radius * 0.9 <= distance <= radius * 1.1
+
+    return within_angle && within_radius, distance - radius
+end
+
+function is_within_angle(pt_a, pt_b, center, angle)
+    angle_a = atan2(pt_a[2] - center[2], pt_a[1] - center[1])
+    angle_b = atan2(pt_b[2] - center[2], pt_b[1] - center[1])
+
+    # Normalize angles
+    angle = (angle + 2π) % (2π)
+    angle_a = (angle_a + 2π) % (2π)
+    angle_b = (angle_b + 2π) % (2π)
+
+    # Ensure angle_a is less than angle_b
+    if angle_a > angle_b
+        angle_a, angle_b = angle_b, angle_a
+    end
+
+    # Check if angle is between angle_a and angle_b
+    angle_a <= angle && angle <= angle_b
+end
+
+
+function point_to_segment_distance(point, segment)
+    a, b = segment.pt_a, segment.pt_b
+    ab = b - a
+    ap = point - a
+    t = clamp(dot(ap, ab) / dot(ab, ab), 0.0, 1.0)
+    closest = a + t * ab
+    distance = norm(point - closest)
+    return distance
+end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Helper function to calculate the distance from a point to a line segment
+# function point_to_segment_distance(point, segment)
+#     #@info "Point input type and value: " typeof(point), point
+#     if length(point) < 2
+#         @error "Invalid point length"
+#         return Inf
+#     end
+#     try
+#         p = SVector{2, Float64}(point...)
+#         a, b = segment.pt_a, segment.pt_b
+#         ab = b - a
+#         ap = p - a
+#         t = dot(ap, ab) / dot(ab, ab)
+#         t = clamp(t, 0.0, 1.0)
+#         closest = a + t * ab
+#         distance = norm(p - closest)
+#         @info "Closest point on segment: $closest"
+#         @info "Distance from point to segment: $distance"
+#         return distance
+#     catch e
+#         @error "Failed to calculate point-to-segment distance" exception=(e, catch_backtrace())
+#         return Inf
+#     end
+# end
 
 
 function point_within_curve(point, center, start_angle, end_angle, radius, width)
@@ -55,75 +170,87 @@ function point_within_curve(point, center, start_angle, end_angle, radius, width
     return result
 end
 
-function is_within_curved_boundary(position, boundary)
-    @info "Checking if position is within curved boundary"
-    center = calculate_curve_center(boundary)
-    radius = calculate_curve_radius(boundary)
-    width = norm(boundary.pt_a - boundary.pt_b)
-    start_angle, end_angle = calculate_curve_angles(center, boundary.pt_a, boundary.pt_b)
-    result = point_within_curve(position, center, start_angle, end_angle, radius, width)
-    @info "Point within curved boundary: $result"
-    return result
+# function is_within_curved_boundary(position, boundary)
+#     @info "Checking if position is within curved boundary"
+#     center = calculate_curve_center(boundary)
+#     radius = calculate_curve_radius(boundary)
+#     width = norm(boundary.pt_a - boundary.pt_b)
+#     start_angle, end_angle = calculate_curve_angles(center, boundary.pt_a, boundary.pt_b)
+#     result = point_within_curve(position, center, start_angle, end_angle, radius, width)
+#     @info "Point within curved boundary: $result"
+#     return result
+# end
+
+# function find_current_segment(position, map_segments)
+#     @info "Finding segment for position: $position"
+#     min_distance = Inf
+#     best_segment_id = -1
+#     for (id, segment) in map_segments
+#         within, distance = is_within_segment(position, segment)
+#         @info "Checked segment $id, within: $within, distance: $distance"
+#         if within && distance < min_distance
+#             min_distance = distance
+#             best_segment_id = id
+#         end
+#     end
+#     if best_segment_id != -1
+#         @info "Segment found: $best_segment_id"
+#         return best_segment_id
+#     else
+#         @error "No current segment found for position: $position"
+#         return -1
+#     end
+# end
+
+# function is_within_segment(position, segment)
+#     if segment.lane_boundaries[1].curvature != 0
+#         # Handle curved segment
+#         center = calculate_curve_center(segment)
+#         radius = calculate_curve_radius(segment)
+#         width = norm(segment.lane_boundaries[1].pt_a - segment.lane_boundaries[1].pt_b)
+#         start_angle, end_angle = calculate_curve_angles(center, segment.lane_boundaries[1].pt_a, segment.lane_boundaries[1].pt_b)
+#         result = point_within_curve(position, center, start_angle, end_angle, radius, width)
+#         distance = point_to_segment_distance(position, center, radius, start_angle, end_angle)  # This needs to be implemented
+#         return result, distance
+#     else
+#         # Handle straight segment
+#         distance = minimum(point_to_segment_distance(position, boundary) for boundary in segment.lane_boundaries)
+#         return distance <= 0.1, distance
+#     end
+# end
+
+function heuristic(a, b)
+    # Example: Euclidean distance as heuristic
+    (ax, ay) = map_segments[a].center
+    (bx, by) = map_segments[b].center
+    return sqrt((bx - ax)^2 + (by - ay)^2)
 end
 
-function find_current_segment(position, map_segments)
-    @info "inside find_cur_segment"
-    for (id, segment) in map_segments
-        if is_within_segment(position, segment)
-            @info "Processing segment" segment_id=id
-            return id
-        end
-    end
-    @error "No current segment found for position: $position"
-    return -1
-end
-
-# Determine if the position is within the given road segment
-function is_within_segment(position, segment)
-    try
-        @info "Processing segment" segment_id = segment.id
-        if segment.lane_boundaries[1].curvature != 0
-            # Handle curved segment
-            center = calculate_curve_center(segment)
-            radius = calculate_curve_radius(segment)
-            width = norm(segment.lane_boundaries[1].pt_a - segment.lane_boundaries[1].pt_b)
-            start_angle, end_angle = calculate_curve_angles(center, segment.lane_boundaries[1].pt_a, segment.lane_boundaries[1].pt_b)
-            return point_within_curve(position, center, start_angle, end_angle, radius, width)
-        else
-            # Handle straight segment
-            return all(boundary -> point_to_segment_distance(position, boundary) <= 0.1, segment.lane_boundaries)
-        end
-    catch e
-        @error "Error while processing segment" segment_id = segment.id, exception = (e, catch_backtrace())
-        return false
-    end
-end
-
-# Placeholder for the A* search algorithm to find the shortest path between two segments
 function shortest_path(start_id, target_id, map_segments)
     @info "Starting shortest path calculation"
-    queue = [start_id]
-    came_from = Dict(start_id => nothing)
+    open_set = PriorityQueue()
+    enqueue!(open_set, start_id, 0)
 
-    while !isempty(queue)
-        current = popfirst!(queue)
-        @info "Current segment in BFS: $current"
+    came_from = Dict{Int, Int}()
+    g_score = Dict{Int, Float64}(start_id => 0)
+    f_score = Dict{Int, Float64}(start_id => heuristic(start_id, target_id))
+
+    while !isempty(open_set)
+        current = dequeue!(open_set)
 
         if current == target_id
-            @info "Target segment reached: $current"
-            path = []
-            while current !== nothing
-                push!(path, current)
-                current = came_from[current]
-            end
-            return reverse(path)
+            return reconstruct_path(came_from, current)
         end
 
         for neighbor in map_segments[current].children
-            @info "Checking neighbor: $neighbor"
-            if !haskey(came_from, neighbor)
-                push!(queue, neighbor)
+            tentative_g_score = get(g_score, current, Inf) + distance(current, neighbor, map_segments)
+            if tentative_g_score < get(g_score, neighbor, Inf)
                 came_from[neighbor] = current
+                g_score[neighbor] = tentative_g_score
+                f_score[neighbor] = tentative_g_score + heuristic(neighbor, target_id)
+                if !haskey(open_set, neighbor)
+                    enqueue!(open_set, neighbor, f_score[neighbor])
+                end
             end
         end
     end
@@ -132,6 +259,31 @@ function shortest_path(start_id, target_id, map_segments)
     return []
 end
 
+function reconstruct_path(came_from, current)
+    path = []
+    while haskey(came_from, current)
+        pushfirst!(path, current)
+        current = came_from[current]
+    end
+    pushfirst!(path, current)
+    return path
+end
+
+function distance(current, neighbor, map_segments)
+    # Placeholder for actual distance calculation
+    return norm(map_segments[current].center - map_segments[neighbor].center)
+end
+
+function adjust_position_based_on_yaw(position, yaw)
+    if length(position) < 2
+        @error "Invalid position length"
+        return position
+    end
+    pos = SVector{2, Float64}(position[1], position[2])
+    adjusted_position = pos + SVector{2, Float64}(7*cos(yaw), 7*sin(yaw))
+    #@info "Adjusted position based on yaw" original_position=pos adjusted_position=adjusted_position yaw=yaw
+    return adjusted_position
+end
 
 function calculate_curve_center(boundary)
     pt_a, pt_b = boundary.pt_a, boundary.pt_b
