@@ -121,12 +121,12 @@ function point_to_segment_distance(point, segment)
     return distance
 end
 
-function heuristic(a, b)
-    # Example: Euclidean distance as heuristic
-    (ax, ay) = map_segments[a].center
-    (bx, by) = map_segments[b].center
+function heuristic(a, b, map_segments)
+    ax, ay = calculate_segment_center(map_segments[a])
+    bx, by = calculate_segment_center(map_segments[b])
     return sqrt((bx - ax)^2 + (by - ay)^2)
 end
+
 
 function shortest_path(start_id, target_id, map_segments)
     @info "Starting shortest path calculation"
@@ -135,7 +135,7 @@ function shortest_path(start_id, target_id, map_segments)
 
     came_from = Dict{Int, Int}()
     g_score = Dict{Int, Float64}(start_id => 0)
-    f_score = Dict{Int, Float64}(start_id => heuristic(start_id, target_id))
+    f_score = Dict{Int, Float64}(start_id => heuristic(start_id, target_id, map_segments))
 
     while !isempty(open_set)
         current = dequeue!(open_set)
@@ -145,11 +145,11 @@ function shortest_path(start_id, target_id, map_segments)
         end
 
         for neighbor in map_segments[current].children
-            tentative_g_score = get(g_score, current, Inf) + distance(current, neighbor, map_segments)
+            tentative_g_score = g_score[current] + distance(current, neighbor, map_segments)
             if tentative_g_score < get(g_score, neighbor, Inf)
                 came_from[neighbor] = current
                 g_score[neighbor] = tentative_g_score
-                f_score[neighbor] = tentative_g_score + heuristic(neighbor, target_id)
+                f_score[neighbor] = tentative_g_score + heuristic(neighbor, target_id, map_segments)
                 if !haskey(open_set, neighbor)
                     enqueue!(open_set, neighbor, f_score[neighbor])
                 end
@@ -172,8 +172,29 @@ function reconstruct_path(came_from, current)
 end
 
 function distance(current, neighbor, map_segments)
-    # Placeholder for actual distance calculation
-    return norm(map_segments[current].center - map_segments[neighbor].center)
+    (current_x, current_y) = calculate_segment_center(map_segments[current])
+    (neighbor_x, neighbor_y) = calculate_segment_center(map_segments[neighbor])
+    return sqrt((neighbor_x - current_x)^2 + (neighbor_y - current_y)^2)
+end
+
+
+function calculate_segment_center(segment)
+    # Calculate the centroid of the segment based on its boundary points
+    x_sum = y_sum = 0
+    count = 0  # Total number of points
+    
+    for boundary in segment.lane_boundaries
+        # Adding both points of the boundary
+        x_sum += boundary.pt_a[1] + boundary.pt_b[1]
+        y_sum += boundary.pt_a[2] + boundary.pt_b[2]
+        count += 2
+    end
+    
+    # Calculate the average of all x and y coordinates
+    centroid_x = x_sum / count
+    centroid_y = y_sum / count
+    
+    return (centroid_x, centroid_y)
 end
 
 function adjust_position_based_on_yaw(position, yaw)
@@ -225,23 +246,40 @@ function calculate_curve_angles(center, pt_a, pt_b)
     end
 end
 
-function compute_navigation_commands(segment, state)
-    # Assuming the vehicle needs to adjust to the center of the road
-    lane_center = (segment.lane_boundaries[1].pt_a + segment.lane_boundaries[end].pt_b) / 2
-    heading_to_target = atan(lane_center[2] - state.position[2], lane_center[1] - state.position[1])
-    steering_angle = heading_to_target - state.orientation
 
-    # Simplified control for velocity based on segment speed limit
-    velocity = min(segment.speed_limit, norm(state.velocity))
-
-    return steering_angle, velocity
+function navigate_segment(segment, state, yaw, socket)
+    try
+        if !isopen(socket)
+            @warn "Socket is closed, attempting to reconnect..."
+            #uuh how to reconnec5
+        end
+        steering_angle, velocity = compute_stanley_navigation_commands(segment, state, yaw)
+        cmd = (steering_angle, velocity, true)
+        serialize(socket, cmd)
+        @info "Navigating segment $(segment.id): Steering angle: $(steering_angle), Velocity: $(velocity)"
+    catch e
+        @error "An error occurred while navigating the segment" exception=(e, catch_backtrace())
+    end
 end
 
-function navigate_segment(segment, state, socket)
-    steering_angle, velocity = compute_navigation_commands(segment, state)
-    cmd = VehicleCommand(steering_angle, velocity, true)
-    serialize(socket, cmd)
-    @info "Navigating segment $(segment.id): Steering angle: $(steering_angle), Velocity: $(velocity)"
+
+function compute_stanley_navigation_commands(segment, state, yaw)
+    # Determine the path's desired orientation at the closest point to the vehicle
+    lane_center = (segment.lane_boundaries[1].pt_a + segment.lane_boundaries[end].pt_b) / 2
+    path_angle = atan(lane_center[2] - state.position[2], lane_center[1] - state.position[1])
+    path_error = path_angle - yaw  # Heading error
+
+    # Cross-track error calculation should be norm of vector difference
+    cross_track_error = norm([lane_center[1] - state.position[1], lane_center[2] - state.position[2]])
+
+    # Stanley Control Law for Steering; calculate with correct division
+    k = 1.0  # Control gain
+    steering_angle = path_error + atan(k * cross_track_error / norm(state.velocity))  # Ensure state.velocity is not a vector here
+
+    # Velocity control could be simplified or based on PID controllers for more accuracy
+    velocity = min(segment.speed_limit, 10.0)  # Assuming a sensible constant speed for testing
+
+    return steering_angle, velocity
 end
 
 
