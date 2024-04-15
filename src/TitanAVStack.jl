@@ -9,6 +9,7 @@ using StaticArrays
 using RigidBodyDynamics
 using Rotations
 using PolygonInbounds
+using MeshCat
 
 include("Routing.jl")
 include("control.jl")

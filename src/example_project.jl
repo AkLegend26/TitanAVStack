@@ -134,17 +134,15 @@ function decision_making(localization_state_channel, map_segments, socket, targe
                 #@info adjusted_position
                 # Now find the current segment using the adjusted position
                 current_segment_id = find_current_segment(position, map_segments)
-                @info current_segment_id
-                sleep(5)
                 if current_segment_id == -1
                     @error "No segment found for position" position=latest_localization_state.position
                     sleep(1)
                     continue  # Skip to the next iteration if no segment is found
                 end
                 @info "Current segment found" segment_id=current_segment_id
-                sleep(1)
                 @info "Calculating shortest path..."
                 path = shortest_path(current_segment_id, target_road_segment_id, map_segments)
+                sleep(1)
                 @info "Navigating through path...", length(path)
                 for segment_id in path
                     segment = map_segments[segment_id]
@@ -233,11 +231,13 @@ function test_localization(gt_channel, localization_state_channel)
 end
 
 function my_client(host::IPAddr=IPv4(0), port=4444)
-    @info "hello"
+    @info "BabyyLegend"
 
+    #vis = Visualizer()
+    #open(vis)
     socket = Sockets.connect(host, port)
-    map_segments = VehicleSim.training_map()
-    @info map_segments
+    map_segments = VehicleSim.city_map()
+    #VehicleSim.view_map(vis, map_segments)
 
     msg = deserialize(socket) # Visualization info
     @info msg
