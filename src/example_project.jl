@@ -120,38 +120,33 @@ end
 
 function decision_making(localization_state_channel, map_segments, socket, target_road_segment_id)
     @info "Decision making task started..."
-    while true
+    while true 
         try
             if isready(localization_state_channel)
                 latest_localization_state = fetch(localization_state_channel)
-                @info "Finding current segment..."
-
-                # Extract position and orientation
-                position = latest_localization_state.position[1:2] 
-                @info position
+                @info "Finding current segment..." latest_localization_state.position
                 yaw = extract_yaw_from_quaternion(latest_localization_state.orientation)
-                #adjusted_position = adjust_position_based_on_yaw(position, yaw)
-                #@info adjusted_position
-                # Now find the current segment using the adjusted position
-                current_segment_id = find_current_segment(position, map_segments)
-                @info current_segment_id
-                sleep(5)
+
+                current_segment_id = find_current_segment(latest_localization_state.position[1:2], map_segments)
                 if current_segment_id == -1
-                    @error "No segment found for position" position=latest_localization_state.position
+                    @error "No segment found for position" latest_localization_state.position
                     sleep(1)
-                    continue  # Skip to the next iteration if no segment is found
+                    continue
                 end
+
                 @info "Current segment found" segment_id=current_segment_id
-                sleep(1)
-                @info "Calculating shortest path..."
                 path = shortest_path(current_segment_id, target_road_segment_id, map_segments)
-                @info "Navigating through path...", length(path)
-                for segment_id in path
-                    segment = map_segments[segment_id]
-                    navigate_segment(segment, latest_localization_state, socket)
+                if isempty(path)
+                    @warn "No path found" current_segment_id
+                    continue
                 end
+
+                @info "Navigating through path..." length(path)
+                for segment_id in path
+                    navigate_segment(map_segments[segment_id], latest_localization_state, yaw, socket) 
+                end                
             else
-                sleep(0.1)  # Sleep to prevent tight loop if channel is empty
+                sleep(0.1)
             end
         catch e
             @error "An error occurred during the decision making process" exception=(e, catch_backtrace())
@@ -233,12 +228,13 @@ function test_localization(gt_channel, localization_state_channel)
 end
 
 function my_client(host::IPAddr=IPv4(0), port=4444)
-    @info "hello"
+    @info "BabyyLegend"
 
+    #vis = Visualizer()
+    #open(vis)
     socket = Sockets.connect(host, port)
-    map_segments = VehicleSim.training_map()
-    @info map_segments
-
+    map_segments = VehicleSim.city_map()
+    #VehicleSim.view_map(vis, map_segments)
     msg = deserialize(socket) # Visualization info
     @info msg
 
@@ -258,32 +254,30 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
         "********************
       TITANS REVING
       ********************"
-
     @info client_info_string
 
-    target_map_segment = 0 # (not a valid segment, will be overwritten by message) #del
+    target_map_segment = 0 # (not a valid segment, will be overwritten by message)
     ego_vehicle_id = 0 # (not a valid id, will be overwritten by message. This is used for discerning ground-truth messages)
     
     @info gps_channel, imu_channel
 
-
-    errormonitor(@async while true
+    errormonitor(@async while isopen(socket)  # Check if the socket is still open
         # This while loop reads to the end of the socket stream (makes sure you
         # are looking at the latest messages)
         sleep(0.001)
         local measurement_msg
         received = false
 
-        while true
-            @async eof(socket)
-            if bytesavailable(socket) > 0
-                measurement_msg = deserialize(socket)
-                received = true
-            else
-                break
-            end
+        while isopen(socket) && bytesavailable(socket) > 0
+            measurement_msg = deserialize(socket)
+            received = true
+            break  # Exit this inner loop if data is received
         end
-        !received && continue
+
+        if !received
+            continue  # Skip to the next iteration if no new data was received
+        end
+
         target_map_segment = measurement_msg.target_segment
         ego_vehicle_id = measurement_msg.vehicle_id
         for meas in measurement_msg.measurements
@@ -302,12 +296,11 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
             end
         end
     end)
+
     targets = 51
-    
     @async localize(gt_channel, localization_state_channel)
     #@async localize(gps_channel, imu_channel, localization_state_channel)
     #@async test_localization(gt_channel, localization_state_channel)
-
     #@async perception(cam_channel, localization_state_channel, perception_state_channel)
     @async decision_making(localization_state_channel, map_segments, socket, targets)
 end

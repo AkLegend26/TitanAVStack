@@ -821,11 +821,9 @@ version = "0.7.1"
 
 [[deps.MeshCat]]
 deps = ["Base64", "BinDeps", "Blink", "Cassette", "Colors", "CoordinateTransformations", "DocStringExtensions", "FFMPEG", "GeometryBasics", "LinearAlgebra", "Logging", "MsgPack", "Mux", "Parameters", "Pkg", "Requires", "Rotations", "Sockets", "StaticArrays", "UUIDs", "WebSockets"]
-git-tree-sha1 = "f6cbc841c70aed00b53d7139a0f531548267cd60"
-repo-rev = "master"
-repo-url = "https://github.com/forrestlaine/MeshCat.jl"
+git-tree-sha1 = "0ca67089520745398ad211a2b4141c8509d95bec"
 uuid = "283c5d60-a78f-5afe-a0af-af636b173e11"
-version = "0.14.2"
+version = "0.15.1"
 
 [[deps.MeshCatMechanisms]]
 deps = ["ColorTypes", "CoordinateTransformations", "GeometryBasics", "InteractBase", "Interpolations", "LoopThrottle", "MechanismGeometries", "MeshCat", "OrderedCollections", "RigidBodyDynamics"]
