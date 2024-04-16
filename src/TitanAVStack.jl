@@ -15,8 +15,9 @@ using MeshCat
 mutable struct ControlState
     previous_cross_track_error::Float64
     delta_time::Float64
+    error_integral::Float64
 
-    ControlState() = new(0.0, 0.1)  # Initialize with default values
+    ControlState() = new(0.0, 0.1, 0.0)  # Initialize with default values
 end
 
 include("Routing.jl")

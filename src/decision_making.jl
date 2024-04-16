@@ -288,47 +288,57 @@ function compute_stanley_navigation_commands(segment, state, yaw, control_state:
     lane_center = (segment.lane_boundaries[1].pt_a + segment.lane_boundaries[end].pt_b) / 2
     path_angle = atan(lane_center[2] - state.position[2], lane_center[1] - state.position[1])
     path_error = path_angle - yaw  # Heading error
-    @info "path_error: " path_error
+    @info "path_error: ", path_error
 
-    # Previously defined variables
-    k_p = 0.6  # Proportional gain
-    k_d = 0.3  # Derivative gain
-    delta_time = 0.1  # Time interval between control updates
+    # Proportional, Integral, Derivative gains
+    k_p = 0.3  # Proportional gain
+    k_i = 0.05  # Integral gain
+    k_d = 0.6  # Derivative gain
 
-    # Compute current cross-track error as before
+    # Compute current cross-track error
     cross_track_error = norm([lane_center[1] - state.position[1], lane_center[2] - state.position[2]])
     @info "Current cross-track error: ", cross_track_error
     @info "Previous cross-track error from state: ", control_state.previous_cross_track_error
 
-    # Stanley Control Law for Steering; calculate with correct division
-    k = 0.5  # Control gain
-    min_velocity = 1.0  # Minimum velocity to prevent excessive steering response at low speeds
-    damping_velocity = max(norm(state.velocity), min_velocity)  # Use max to avoid division by zero
-
     # Calculate error derivative
-    error_derivative = (cross_track_error - control_state.previous_cross_track_error) / delta_time
+    error_derivative = (cross_track_error - control_state.previous_cross_track_error) / control_state.delta_time
 
-    # Update steering command using PD control
-    steering_command = k_p * cross_track_error + k_d * error_derivative
+    # Update integral
+    new_error_integral = control_state.error_integral + cross_track_error * control_state.delta_time
 
+    # Check for integral reset conditions
+    if abs(cross_track_error) < 0.05 || abs(new_error_integral) > 500  # Thresholds can be adjusted
+        new_error_integral = 0
+        @info "Integral reset triggered"
+    end
+
+    # Update control state
+    control_state.error_integral = new_error_integral
+    control_state.previous_cross_track_error = cross_track_error
+
+    # Calculate steering command using PID controller
+    steering_command = k_p * cross_track_error + k_i * new_error_integral + k_d * error_derivative
+
+    # Compute steering angle with damping based on vehicle velocity
+    min_velocity = 1.0  # Minimum velocity to prevent excessive steering response at low speeds
+    damping_velocity = max(min_velocity, norm(state.velocity))
     steering_angle = path_error + atan(steering_command / damping_velocity)
 
-    # Clamping steering angle to prevent excessive steering changes
-    max_steering_angle = pi / 6  # Limit steering to +/- 30 degrees
+    # Clamping steering angle to prevent excessive turns
+    max_steering_angle = pi / 8  # +/- 22.5 degrees
     steering_angle = clamp(steering_angle, -max_steering_angle, max_steering_angle)
 
     @info "Steering angle computed: ", steering_angle
-
-    # Store current error for next iteration
-    control_state.previous_cross_track_error = cross_track_error
-
     @info "Updated previous cross-track error in state: ", control_state.previous_cross_track_error
+    @info "Integral of error updated: ", control_state.error_integral
 
-    # Velocity control could be simplified or based on PID controllers for more accuracy
+    # Velocity control simplified for consistent speed
     velocity = min(segment.speed_limit, 10.0)  # Assuming a sensible constant speed for testing
 
     return steering_angle, velocity
 end
+
+
 
 
 
