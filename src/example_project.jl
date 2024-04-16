@@ -11,6 +11,13 @@ struct MyPerceptionType
     field2::Float64
 end
 
+# mutable struct ControlState
+#     previous_cross_track_error::Float64
+#     delta_time::Float64
+
+#     ControlState() = new(0.0, 0.1)  # initialize with default values
+# end
+
 ###Running working localization code
 # function localize(gps_channel::Channel{GPSMeasurement}, imu_channel::Channel{IMUMeasurement}, localization_state_channel::Channel{MyLocalizationType})
 #     @info "Localization process started."
@@ -118,7 +125,7 @@ function perception(cam_meas_channel, localization_state_channel, perception_sta
     @info "Perception out!!"
 end
 
-function decision_making(localization_state_channel, map_segments, socket, target_road_segment_id)
+function decision_making(localization_state_channel, map_segments, socket, target_road_segment_id, control_state::ControlState)
     @info "Decision making task started..."
     while true 
         try
@@ -143,9 +150,10 @@ function decision_making(localization_state_channel, map_segments, socket, targe
 
                 @info "Navigating through path..." length(path)
                 for segment_id in path
-                    navigate_segment(map_segments[segment_id], latest_localization_state, yaw, socket) 
+                    navigate_segment(map_segments[segment_id], latest_localization_state, yaw, socket, control_state) 
                 end                
             else
+                @info "localization channel not ready"
                 sleep(0.1)
             end
         catch e
@@ -246,7 +254,7 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
     localization_state_channel = Channel{MyLocalizationType}(1)
     perception_state_channel = Channel{MyPerceptionType}(1)
 
-    target_velocity = 0.0
+    target_velocity = 0.0 
     steering_angle = 0.0
     controlled = true
 
@@ -298,9 +306,10 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
     end)
 
     targets = 51
-    @async localize(gt_channel, localization_state_channel)
-    #@async localize(gps_channel, imu_channel, localization_state_channel)
+    control_state = ControlState()
+    errormonitor(@async localize(gt_channel, localization_state_channel))
+    # @async localize(gps_channel, imu_channel, localization_state_channel)
     #@async test_localization(gt_channel, localization_state_channel)
     #@async perception(cam_channel, localization_state_channel, perception_state_channel)
-    @async decision_making(localization_state_channel, map_segments, socket, targets)
+    errormonitor(@async decision_making(localization_state_channel, map_segments, socket, targets, control_state))
 end

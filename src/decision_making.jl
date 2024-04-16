@@ -247,13 +247,13 @@ function calculate_curve_angles(center, pt_a, pt_b)
 end
 
 
-function navigate_segment(segment, state, yaw, socket)
+function navigate_segment(segment, state, yaw, socket, control_state::ControlState)
     try
         if !isopen(socket)
             @warn "Socket is closed, attempting to reconnect..."
             #uuh how to reconnec5
         end
-        steering_angle, velocity = compute_stanley_navigation_commands(segment, state, yaw)
+        steering_angle, velocity = compute_stanley_navigation_commands(segment, state, yaw, control_state)
         cmd = (steering_angle, velocity, true)
         serialize(socket, cmd)
         @info "Navigating segment $(segment.id): Steering angle: $(steering_angle), Velocity: $(velocity)"
@@ -263,18 +263,66 @@ function navigate_segment(segment, state, yaw, socket)
 end
 
 
-function compute_stanley_navigation_commands(segment, state, yaw)
+# function compute_stanley_navigation_commands(segment, state, yaw)
+#     # Determine the path's desired orientation at the closest point to the vehicle
+#     lane_center = (segment.lane_boundaries[1].pt_a + segment.lane_boundaries[end].pt_b) / 2
+#     path_angle = atan(lane_center[2] - state.position[2], lane_center[1] - state.position[1])
+#     path_error = path_angle - yaw  # Heading error
+#     @info "path_error: " path_error
+
+#     # Cross-track error calculation should be norm of vector difference
+#     cross_track_error = norm([lane_center[1] - state.position[1], lane_center[2] - state.position[2]])
+
+#     # Stanley Control Law for Steering; calculate with correct division
+#     k = 1.0  # Control gain
+#     steering_angle = path_error + atan(k * cross_track_error / norm(state.velocity))  # Ensure state.velocity is not a vector here
+
+#     # Velocity control could be simplified or based on PID controllers for more accuracy
+#     velocity = min(segment.speed_limit, 10.0)  # Assuming a sensible constant speed for testing
+
+#     return steering_angle, velocity
+# end
+
+function compute_stanley_navigation_commands(segment, state, yaw, control_state::ControlState)
     # Determine the path's desired orientation at the closest point to the vehicle
     lane_center = (segment.lane_boundaries[1].pt_a + segment.lane_boundaries[end].pt_b) / 2
     path_angle = atan(lane_center[2] - state.position[2], lane_center[1] - state.position[1])
     path_error = path_angle - yaw  # Heading error
+    @info "path_error: " path_error
 
-    # Cross-track error calculation should be norm of vector difference
+    # Previously defined variables
+    k_p = 0.6  # Proportional gain
+    k_d = 0.3  # Derivative gain
+    delta_time = 0.1  # Time interval between control updates
+
+    # Compute current cross-track error as before
     cross_track_error = norm([lane_center[1] - state.position[1], lane_center[2] - state.position[2]])
+    @info "Current cross-track error: ", cross_track_error
+    @info "Previous cross-track error from state: ", control_state.previous_cross_track_error
 
     # Stanley Control Law for Steering; calculate with correct division
-    k = 1.0  # Control gain
-    steering_angle = path_error + atan(k * cross_track_error / norm(state.velocity))  # Ensure state.velocity is not a vector here
+    k = 0.5  # Control gain
+    min_velocity = 1.0  # Minimum velocity to prevent excessive steering response at low speeds
+    damping_velocity = max(norm(state.velocity), min_velocity)  # Use max to avoid division by zero
+
+    # Calculate error derivative
+    error_derivative = (cross_track_error - control_state.previous_cross_track_error) / delta_time
+
+    # Update steering command using PD control
+    steering_command = k_p * cross_track_error + k_d * error_derivative
+
+    steering_angle = path_error + atan(steering_command / damping_velocity)
+
+    # Clamping steering angle to prevent excessive steering changes
+    max_steering_angle = pi / 6  # Limit steering to +/- 30 degrees
+    steering_angle = clamp(steering_angle, -max_steering_angle, max_steering_angle)
+
+    @info "Steering angle computed: ", steering_angle
+
+    # Store current error for next iteration
+    control_state.previous_cross_track_error = cross_track_error
+
+    @info "Updated previous cross-track error in state: ", control_state.previous_cross_track_error
 
     # Velocity control could be simplified or based on PID controllers for more accuracy
     velocity = min(segment.speed_limit, 10.0)  # Assuming a sensible constant speed for testing

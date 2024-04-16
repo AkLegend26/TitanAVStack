@@ -11,6 +11,14 @@ using Rotations
 using PolygonInbounds
 using MeshCat
 
+# Define ControlState here
+mutable struct ControlState
+    previous_cross_track_error::Float64
+    delta_time::Float64
+
+    ControlState() = new(0.0, 0.1)  # Initialize with default values
+end
+
 include("Routing.jl")
 include("control.jl")
 include("decision_making.jl")
