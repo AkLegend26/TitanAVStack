@@ -378,10 +378,10 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
     ego_vehicle_id = 0 # (not a valid id, will be overwritten by message. This is used for discerning ground-truth messages)
 
     # Start localization and perception asynchronous tasks
-    @async localize(gps_channel, imu_channel, localization_state_channel)
-    @async perception(cam_channel, localization_state_channel, perception_state_channel)
+    # @async localize(gps_channel, imu_channel, localization_state_channel)
+    # @async perception(cam_channel, localization_state_channel, perception_state_channel)
     # @async decision_making(localization_state_channel, perception_state_channel, map_segments, socket)
-    @async decision_making(localization_state_channel, perception_state_channel, map_segments, socket, targets, control_state)
+    # @async decision_making(localization_state_channel, perception_state_channel, map_segments, socket, targets, control_state)
 
 
     @info gps_channel, imu_channel
@@ -426,8 +426,8 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
     control_state = ControlState()
     errormonitor(@async localize(gt_channel, localization_state_channel))
     # @async localize(gps_channel, imu_channel, localization_state_channel)
-    #@async test_localization(gt_channel, localization_state_channel)
-    # errormonitor(@async perception(cam_channel, localization_state_channel, perception_state_channel))
+    # @async test_localization(gt_channel, localization_state_channel)
+    errormonitor(@async perception(cam_channel, localization_state_channel, perception_state_channel))
     errormonitor(@async decision_making(localization_state_channel, perception_state_channel, map_segments, socket, targets, control_state))
 
     if isready(localization_state_channel) && isready(perception_state_channel)

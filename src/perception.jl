@@ -80,31 +80,68 @@ end
 # Function to process camera data and generate detected objects with polylines
 function process_camera_data(camera_data)
     detected_objects = DetectedObject[]
-    for bbox in camera_data.bounding_boxes
-        position = SVector{3, Float64}(rand(), rand(), 0.0)
-        dimensions = SVector{3, Float64}(bbox[3] - bbox[1], bbox[4] - bbox[2], 2.0)
-        points = [SVector{2, Float64}(rand(), rand()) for _ in 1:5]  # Dummy points for demonstration
-        polyline = Polyline(points)
-        push!(detected_objects, DetectedObject(position, dimensions, "vehicle", polyline))
+    if isempty(camera_data.bounding_boxes)
+        @info "No bounding boxes available for processing."
+        return detected_objects
     end
+
+    for bbox in camera_data.bounding_boxes
+        @info "Processing bounding box" bbox=bbox
+        position = SVector{3, Float64}(rand(), rand(), 0.0)  # Placeholder for actual position logic
+        dimensions = SVector{3, Float64}(bbox[3] - bbox[1], bbox[4] - bbox[2], 2.0)
+        
+        # Ensure dimensions are valid
+        if any(isnan.(dimensions)) || any(dimensions .<= 0)
+            @warn "Invalid dimensions for detected object, skipping" dimensions=dimensions
+            continue
+        end
+
+        points = [SVector{2, Float64}(rand(), rand()) for _ in 1:5]  # Dummy points
+        polyline = Polyline(points)
+        detected_object = DetectedObject(position, dimensions, "vehicle", polyline)
+        push!(detected_objects, detected_object)
+        @info "Object detected" position=position dimensions=dimensions
+    end
+
+    if isempty(detected_objects)
+        @info "No objects detected after processing all bounding boxes."
+    else
+        @info "Detected objects processed" count=length(detected_objects)
+    end
+
     detected_objects
 end
 
-# Function to update the perception state with new data from the camera channel
+
 function update_perception_state(perception_channel::Channel{PerceptionState}, cam_channel::Channel{CameraMeasurement})
+    @info "Perception update task initialized."
     while true
-        if isready(cam_channel)
-            cam_data = take!(cam_channel)
-            detected_objects = process_camera_data(cam_data)
-            timestamp = cam_data.time
-            perception_state = PerceptionState(detected_objects, timestamp)
-            put!(perception_channel, perception_state)
+        try
+            if isready(cam_channel)
+                @info "Camera data is ready for processing."
+                cam_data = take!(cam_channel)
+                @info "Camera data taken from channel."
+
+                detected_objects = process_camera_data(cam_data)
+                @info "Camera data processed into detected objects." length=length(detected_objects)
+                
+                timestamp = cam_data.time
+                perception_state = PerceptionState(detected_objects, timestamp)
+                @info "Perception state created." timestamp=timestamp
+                
+                put!(perception_channel, perception_state)
+                @info "Perception state put into channel."
+            else
+                @info "No camera measurements received, sleeping..."
+                sleep(0.1)  # Adjust sleep time to prevent high CPU usage when idle
+            end
+        catch e
+            @error "An error occurred in the perception update process" exception=(e, catch_backtrace())
+            break  # You could also choose to continue here depending on error handling strategy
         end
-        sleep(0.001)
     end
 end
 
-# Function to initialize channels and start the perception processing task
 function start_perception_system()
     cam_channel = Channel{CameraMeasurement}(10)
     perception_channel = Channel{PerceptionState}(10)
