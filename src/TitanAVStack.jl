@@ -10,6 +10,7 @@ using RigidBodyDynamics
 using Rotations
 using PolygonInbounds
 using MeshCat
+using Statistics
 
 include("Routing.jl")
 include("control.jl")

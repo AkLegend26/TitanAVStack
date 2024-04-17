@@ -120,31 +120,53 @@ end
 
 function decision_making(localization_state_channel, map_segments, socket, target_road_segment_id)
     @info "Decision making task started..."
-    while true 
+    while true
         try
             if isready(localization_state_channel)
                 latest_localization_state = fetch(localization_state_channel)
-                @info "Finding current segment..." latest_localization_state.position
+                @info "Finding current segment..."
+                latest_localization_state.position
                 yaw = extract_yaw_from_quaternion(latest_localization_state.orientation)
-
                 current_segment_id = find_current_segment(latest_localization_state.position[1:2], map_segments)
                 if current_segment_id == -1
-                    @error "No segment found for position" latest_localization_state.position
+                    @error "No segment found for position"
+                    latest_localization_state.position
                     sleep(1)
                     continue
                 end
-
-                @info "Current segment found" segment_id=current_segment_id
+                @info "Current segment found"
+                @info current_segment_id
+                segment_id = current_segment_id
                 path = shortest_path(current_segment_id, target_road_segment_id, map_segments)
                 if isempty(path)
-                    @warn "No path found" current_segment_id
+                    @warn "No path found"
+                    current_segment_id
                     continue
                 end
+                @info "Navigating through path..."
+                length(path)
+                @info path
 
-                @info "Navigating through path..." length(path)
+                # Get the lookahead segments
+                # lookahead_segments = Vector{VehicleSim.RoadSegment}()
+                # for i in 2:length(path)
+                #     push!(lookahead_segments, map_segments[path[i]])
+                # end
+
                 for segment_id in path
-                    navigate_segment(map_segments[segment_id], latest_localization_state, yaw, socket) 
-                end                
+                    segment = map_segments[segment_id]
+                    while true
+                        result = pure_pursuit_navigate(segment, localization_state_channel,latest_localization_state, socket, yaw)
+                        if result === true
+                            break  # Successfully navigated the segment
+                        elseif result === false
+                            sleep(0.1)  # Wait before trying to navigate the segment again
+                        else
+                            @error "Unexpected result from pure_pursuit_navigate" result
+                            break
+                        end
+                    end
+                end
             else
                 sleep(0.1)
             end
@@ -229,7 +251,6 @@ end
 
 function my_client(host::IPAddr=IPv4(0), port=4444)
     @info "BabyyLegend"
-
     #vis = Visualizer()
     #open(vis)
     socket = Sockets.connect(host, port)
@@ -258,8 +279,6 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
 
     target_map_segment = 0 # (not a valid segment, will be overwritten by message)
     ego_vehicle_id = 0 # (not a valid id, will be overwritten by message. This is used for discerning ground-truth messages)
-    
-    @info gps_channel, imu_channel
 
     errormonitor(@async while isopen(socket)  # Check if the socket is still open
         # This while loop reads to the end of the socket stream (makes sure you
@@ -298,9 +317,9 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
     end)
 
     targets = 51
-    @async localize(gt_channel, localization_state_channel)
+    errormonitor(@async localize(gt_channel, localization_state_channel))
     #@async localize(gps_channel, imu_channel, localization_state_channel)
     #@async test_localization(gt_channel, localization_state_channel)
     #@async perception(cam_channel, localization_state_channel, perception_state_channel)
-    @async decision_making(localization_state_channel, map_segments, socket, targets)
+    errormonitor(@async decision_making(localization_state_channel, map_segments, socket, targets))
 end

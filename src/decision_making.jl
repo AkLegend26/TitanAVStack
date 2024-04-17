@@ -246,41 +246,184 @@ function calculate_curve_angles(center, pt_a, pt_b)
     end
 end
 
+# function navigate_segment(segment, state, yaw, socket)
+#     if !isopen(socket)
+#         @warn "Socket is closed, attempting to reconnect..."
+#         return
+#     end
 
-function navigate_segment(segment, state, yaw, socket)
-    try
-        if !isopen(socket)
-            @warn "Socket is closed, attempting to reconnect..."
-            #uuh how to reconnec5
-        end
-        steering_angle, velocity = compute_stanley_navigation_commands(segment, state, yaw)
-        cmd = (steering_angle, velocity, true)
-        serialize(socket, cmd)
-        @info "Navigating segment $(segment.id): Steering angle: $(steering_angle), Velocity: $(velocity)"
-    catch e
-        @error "An error occurred while navigating the segment" exception=(e, catch_backtrace())
-    end
+#     try
+#         # Validate the lane boundaries
+#         if length(segment.lane_boundaries) < 2
+#             @error "Invalid road segment: less than 2 lane boundaries."
+#             return
+#         end
+#         if is_straight_segment(segment)
+#             path_angle = calculate_path_angle(segment)  # Use a fixed path angle for straight segments
+#         else
+#             path_angle = calculate_dynamic_path_angle(segment, state.position)  # More complex handling for curved segments
+#         end
+
+#         path_error, cross_track_error = compute_path_and_cte(segment, state.position, yaw, path_angle)
+
+#         steering_angle = calculate_steering_angle(path_error, cross_track_error, state.velocity[1])
+#         max_steering_angle = π / 6  # Example: Clamp to 30 degrees
+#         steering_angle = clamp(steering_angle, -max_steering_angle, max_steering_angle)
+#         velocity = adjust_velocity(segment, cross_track_error)
+
+#         # Clamp the steering angle to a max/min to prevent unrealistic steering
+#         # max_steering_angle = π / 6  # Maximum steering angle, e.g., 30 degrees
+#         # steering_angle = calculate_steering_angle(path_angle, cross_track_error, state.velocity[1])
+#         # steering_angle = clamp(steering_angle, -max_steering_angle, max_steering_angle)
+
+#         @info "Current state position: " state.position
+#         @info "path angle:" path_angle
+#         @info "Yaw: " yaw
+#         @info "Path angle: " path_error
+#         @info "Cross-track error: " cross_track_error
+#         @info "Calculated steering angle: " steering_angle
+#         @info "Calculated velocity: " velocity
+
+#         @info "Navigating segment $(segment.id): Steering angle: $(steering_angle), Velocity: $(velocity)"
+
+#         send_commands(steering_angle, velocity, socket)
+
+
+#         return is_at_segment_end(state, segment)  
+#     catch e
+#         @error "An error occurred while navigating the segment" exception=(e, catch_backtrace())
+#         return false
+#     end
+# end
+
+# function calculate_dynamic_path_angle(segment, position)
+#     # This function would calculate path angles based on segment curvature and vehicle position
+#     # Placeholder for more complex path angle calculations
+#     return atan(segment.lane_boundaries[end].pt_b[2] - segment.lane_boundaries[1].pt_a[2], 
+#                  segment.lane_boundaries[end].pt_b[1] - segment.lane_boundaries[1].pt_a[1])
+# end
+
+
+# function calculate_path_angle(segment)
+#     # Assuming this function now returns a consistent angle based on segment orientation
+#     dir_vector = segment.lane_boundaries[end].pt_b - segment.lane_boundaries[1].pt_a
+#     return atan(dir_vector[2], dir_vector[1])
+# end
+
+# function calculate_steering_angle(path_error, cross_track_error, velocity)
+#     k_path = 0.05  # Further reduce path following gain
+#     k_cte = 0.02   # Further reduce cross-track error gain
+
+#     # Calculate steering adjustment based on reduced gains
+#     steering_adjustment = atan(k_cte * cross_track_error / max(velocity, 0.1))  # Smoothing the response
+#     adjusted_steering = path_error + steering_adjustment
+
+#     # Limit the steering angle to prevent excessive turning
+#     max_steering_angle = π / 18  # Limiting to about 10 degrees
+#     return clamp(adjusted_steering, -max_steering_angle, max_steering_angle)
+# end
+
+# # function adjust_velocity(segment, cross_track_error)
+# #     if any(lane_type -> lane_type == VehicleSim.stop_sign, segment.lane_types)
+# #         # Special handling for stop signs
+# #         return min(1.0, segment.speed_limit * 0.1)  # Example adjustment
+# #     end
+
+# #     curvature_effect = max(0.1, 1 - abs(mean([lb.curvature for lb in segment.lane_boundaries])))
+# #     cte_effect = max(0, 1 - abs(cross_track_error) / 5)
+# #     return segment.speed_limit * curvature_effect * cte_effect
+# # end
+
+# # Helper function to calculate the center of the current lane
+# function calculate_lane_center(lane_boundaries)
+#     # Assuming you're taking an average or a midpoint of some sort
+#     midpoint = (lane_boundaries[1].pt_a + lane_boundaries[end].pt_b) / 2
+#     return SVector{2, Float64}(midpoint[1], midpoint[2])
+# end
+
+# function compute_path_and_cte(segment, position, yaw, path_angle)
+#     # Assuming a simple direct path from the start to end of segment
+#     intended_path_angle = path_angle  # This should be the direction of the segment
+#     path_error = intended_path_angle - yaw
+#     path_error = mod(path_error + π, 2 * π) - π  # Normalize the error to be within -π to π
+
+#     # Simple cross-track error based on perpendicular distance to the path
+#     dx = cos(intended_path_angle) * (position[2] - segment.lane_boundaries[1].pt_a[2]) - sin(intended_path_angle) * (position[1] - segment.lane_boundaries[1].pt_a[1])
+#     cross_track_error = abs(dx)
+
+#     @info "Intended Path Angle: $intended_path_angle"
+#     @info "Path Error: $path_error"
+#     @info "Cross-Track Error: $cross_track_error"
+
+#     return path_error, cross_track_error
+# end
+
+
+# # Stanley method for the steering control
+# function stanley_control(path_angle, cross_track_error, velocity, yaw, k)
+#     # Path error is normalized to the range [-π, π]
+#     return path_angle + atan(k * cross_track_error / max(velocity, 0.1)) # Prevent division by zero
+# end
+
+# # Function to determine the velocity based on the segment properties
+# function determine_velocity(segment, cross_track_error, velocity)
+#     # Limit the velocity by the speed limit and potential curvature of the road
+#     curvature = mean([boundary.curvature for boundary in segment.lane_boundaries])
+#     max_velocity = segment.speed_limit
+
+#     # Adjust the velocity based on the cross-track error, current velocity, and desired velocity change rate
+#     velocity_factor = 1.0 - abs(cross_track_error) / 5.0  # Adjust the scaling factor as needed
+#     velocity_factor = max(0.0, min(1.0, velocity_factor))
+#     desired_velocity = max_velocity * velocity_factor
+
+#     # Smooth the velocity change to avoid sudden jumps
+#     velocity_change_rate = 1.0  # Adjust the rate of velocity change as needed
+#     new_velocity = max(0.0, min(max_velocity, velocity + velocity_change_rate * (desired_velocity - velocity)))
+
+#     return new_velocity
+# end
+
+# Function to send commands to the vehicle
+function send_commands(steering_angle, velocity, socket)
+    cmd = (steering_angle, velocity, true)
+    serialize(socket, cmd)
+    @info "command sent"
 end
 
+function is_at_segment_end(state, segment)
+    # Assuming position is a field in state and it's a StaticArraysCore.SVector
+    position = state.position  # Access the position if it's directly accessible
 
-function compute_stanley_navigation_commands(segment, state, yaw)
-    # Determine the path's desired orientation at the closest point to the vehicle
-    lane_center = (segment.lane_boundaries[1].pt_a + segment.lane_boundaries[end].pt_b) / 2
-    path_angle = atan(lane_center[2] - state.position[2], lane_center[1] - state.position[1])
-    path_error = path_angle - yaw  # Heading error
+    target_position = segment.lane_boundaries[end].pt_b  # Target position from the segment
+    distance_to_target = norm(position[1:2] - target_position)  # Calculate the 2D distance
 
-    # Cross-track error calculation should be norm of vector difference
-    cross_track_error = norm([lane_center[1] - state.position[1], lane_center[2] - state.position[2]])
-
-    # Stanley Control Law for Steering; calculate with correct division
-    k = 1.0  # Control gain
-    steering_angle = path_error + atan(k * cross_track_error / norm(state.velocity))  # Ensure state.velocity is not a vector here
-
-    # Velocity control could be simplified or based on PID controllers for more accuracy
-    velocity = min(segment.speed_limit, 10.0)  # Assuming a sensible constant speed for testing
-
-    return steering_angle, velocity
+    tolerance = 1.0  # Define a tolerance within which we consider the segment end reached
+    return distance_to_target < tolerance
 end
+
+# function is_straight_segment(segment::VehicleSim.RoadSegment)
+#     # Check if all curvatures in the segment are negligible
+#     return all(lb -> abs(lb.curvature) < 0.01, segment.lane_boundaries)
+# end
+
+# function compute_stanley_navigation_commands(segment, state, yaw)
+#     # Determine the path's desired orientation at the closest point to the vehicle
+#     lane_center = (segment.lane_boundaries[1].pt_a + segment.lane_boundaries[end].pt_b) / 2
+#     path_angle = atan(lane_center[2] - state.position[2], lane_center[1] - state.position[1])
+#     path_error = path_angle - yaw  # Heading error
+
+#     # Cross-track error calculation should be norm of vector difference
+#     cross_track_error = norm([lane_center[1] - state.position[1], lane_center[2] - state.position[2]])
+
+#     # Stanley Control Law for Steering; calculate with correct division
+#     k = 1.0  # Control gain
+#     steering_angle = path_error + atan(k * cross_track_error / norm(state.velocity))  # Ensure state.velocity is not a vector here
+
+#     # Velocity control could be simplified or based on PID controllers for more accuracy
+#     velocity = min(segment.speed_limit, 2.0)  # Assuming a sensible constant speed for testing
+
+#     return steering_angle, velocity
+# end
 
 
 
@@ -387,3 +530,144 @@ end
 #         return distance <= 0.1, distance
 #     end
 # end
+
+const WHEELBASE_LENGTH = 3.1  # meters, for example
+
+mutable struct PIDController
+    Kp::Float64
+    Ki::Float64
+    Kd::Float64
+    previous_error::Float64
+    integral::Float64
+end
+
+function update_pid(controller::PIDController, error::Float64, dt::Float64)
+    derivative = (error - controller.previous_error) / dt
+    controller.integral += error * dt
+    controller.previous_error = error
+    return controller.Kp * error + controller.Ki * controller.integral + controller.Kd * derivative
+end
+
+# Initialize the PID controllers for steering and velocity
+steering_pid = PIDController(0.01, 0.01, 0.05, 0.0, 0.0)  # Tune these parameters
+velocity_pid = PIDController(1.2, 0.01, 0.05, 0.0, 0.0)  # Tune these parameters
+
+function log_debug_info(segment, state, lookahead_point, steering_angle, velocity, yaw)
+    @info "Debug Info:" begin
+        @info "Segment ID: $(segment.id)"
+        @info "Current Position: $(state.position)"
+        @info "Velocity: $(state.velocity)"
+        @info "Yaw: $yaw"
+        @info "Lookahead Point: $lookahead_point"
+        @info "Steering Angle: $steering_angle"
+        @info "Velocity Command: $velocity"
+    end
+end
+
+function pure_pursuit_navigate(segment, localization_state_channel, state, socket, yaw)
+
+    if isready(localization_state_channel)
+        state = fetch(localization_state_channel)
+        yaw = extract_yaw_from_quaternion(state.orientation)
+    end
+
+    lookahead_distance = dynamic_lookahead(state.velocity, segment.lane_boundaries[1].curvature)
+    lookahead_point = compute_lookahead_point(segment, state.position, lookahead_distance)
+    steering_angle = calculate_steering(state, lookahead_point, yaw, segment.lane_boundaries[1].curvature)
+    dt = 0.1  # simulation time step
+    velocity = adjust_velocity(segment, state.velocity, dt)
+
+    send_commands(steering_angle, velocity, socket)
+    if !within_lane_boundaries(state.position, segment.lane_boundaries)
+        @info "wrong place"
+        correction = correct_course(state, segment, steering_pid)
+        steering_angle += correction
+        send_commands(steering_angle, velocity, socket)
+    end
+    log_debug_info(segment, state, lookahead_point, steering_angle, velocity, yaw)  # Assuming this function is defined to log all relevant information
+    return is_at_segment_end(state, segment)
+end
+
+function dynamic_lookahead(velocity::SVector{3, Float64}, curvature::Float64)
+    base_lookahead = 10.0
+    speed_factor = norm(velocity[1:2]) / 10
+    curvature_adjustment = max(1.0, 1 / abs(curvature))
+    lookahead_distance = base_lookahead * speed_factor / curvature_adjustment
+    return lookahead_distance
+end
+
+function calculate_steering(state, lookahead_point, yaw, curvature)
+    @info "curvature: $(curvature)"
+
+    if curvature == 0
+        return 0  
+    end
+
+    angle_to_lookahead = atan(lookahead_point[2] - state.position[2], lookahead_point[1] - state.position[1])
+    angle_difference = angle_to_lookahead - yaw
+    steering_angle = atan(2 * WHEELBASE_LENGTH * sin(angle_difference) / norm(lookahead_point - state.position[1:2]))
+
+    return steering_angle
+end
+
+function compute_lookahead_point(current_segment, current_position::SVector{3, Float64}, lookahead_distance::Float64)
+    start_point = current_segment.lane_boundaries[1].pt_a
+    end_point = current_segment.lane_boundaries[end].pt_b
+    segment_vector = SVector(end_point[1] - start_point[1], end_point[2] - start_point[2])
+    segment_unit_vector = segment_vector / norm(segment_vector)
+    projected_length = dot(current_position[1:2] - start_point, segment_unit_vector)
+    projected_point = start_point + projected_length * segment_unit_vector
+    lookahead_point = projected_point + lookahead_distance * segment_unit_vector
+    @info "projected point, lookahead point, projected length: $(projected_point) $(lookahead_point) $(projected_length)"
+    return lookahead_point
+end
+
+function adjust_velocity(segment, current_velocity, dt)
+    local min_required_velocity = 1.0  # Set a minimum required velocity
+    local acceleration_rate = 0.5  # Increase acceleration rate
+    desired_velocity = segment.speed_limit
+    velocity_error = desired_velocity - norm(current_velocity[1:2])
+    acceleration = clamp(velocity_error / dt, -acceleration_rate, acceleration_rate)  # Adjust clamp values
+
+    new_velocity = norm(current_velocity[1:2]) + acceleration * dt
+    if new_velocity < min_required_velocity
+        new_velocity = min_required_velocity  # Ensure a minimum velocity if below threshold
+    end
+    return min(new_velocity, desired_velocity)
+end
+
+function within_lane_boundaries(position, lane_boundaries)
+    # Assuming the first half of the lane_boundaries array defines the right half of the road.
+    num_boundaries = length(lane_boundaries) ÷ 2
+    points = [b.pt_a for b in lane_boundaries[1:num_boundaries]]  # Use only the right half
+    push!(points, lane_boundaries[num_boundaries].pt_b)  # Add the endpoint of the last boundary
+
+    # Determine if the position is within the polygon defined by these points
+    inside = false
+    j = lastindex(points)
+    for i in 1:length(points)
+        if ((points[i][2] > position[2]) != (points[j][2] > position[2])) &&
+           (position[1] < (points[j][1] - points[i][1]) * (position[2] - points[i][2]) / 
+            (points[j][2] - points[i][2]) + points[i][1])
+            inside = !inside
+        end
+        j = i
+    end
+    return inside
+end
+
+function correct_course(state, segment, pid_controller)
+    num_boundaries = length(segment.lane_boundaries) ÷ 2
+    centerline_start = (segment.lane_boundaries[1].pt_a + segment.lane_boundaries[num_boundaries].pt_a) / 2
+    centerline_end = (segment.lane_boundaries[1].pt_b + segment.lane_boundaries[num_boundaries].pt_b) / 2
+    centerline_vector = centerline_end - centerline_start
+    perpendicular = SVector(-centerline_vector[2], centerline_vector[1])
+    position_projection = dot((state.position[1:2] - centerline_start), perpendicular)
+
+    # Adjust the correction angle based on feedback and gradually apply it
+    desired_correction = update_pid(pid_controller, position_projection, 0.1)  # Assuming dt=0.1s
+    gradual_correction = clamp(desired_correction, -0.05, 0.05)  # Limit the correction to avoid abrupt changes
+
+    @info "Applying correction: $gradual_correction"
+    return gradual_correction
+end
