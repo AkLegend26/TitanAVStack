@@ -234,6 +234,25 @@ function navigate_segment(segment, localization_state, yaw, socket, control_stat
     serialize(socket, cmd)
 end
 
+function monitor_vehicle_safety(perception_channel, vehicle_state_channel, control_channel)
+    @info "Starting vehicle safety monitoring..."
+    while true
+        perception_state = fetch(perception_channel)
+        vehicle_state = fetch(vehicle_state_channel)
+        
+        for obj in perception_state.detectedObjects
+            if obj.objectType == "obstacle"
+                collision_risk = check_collisions(vehicle_state, obj)
+                if collision_risk.is_risky
+                    take_preventive_action(control_channel, collision_risk)  # Implement actions based on risk assessment
+                end
+            end
+        end
+        sleep(0.1)  # Check at a frequency appropriate for your application's safety requirements
+    end
+end
+
+
 
 function isfull(ch::Channel)
     length(ch.data) ≥ ch.sz_max
@@ -343,7 +362,8 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
     # Start localization and perception asynchronous tasks
     @async localize(gps_channel, imu_channel, localization_state_channel)
     @async perception(cam_channel, localization_state_channel, perception_state_channel)
-    @async decision_making(localization_state_channel, perception_state_channel, map_segments, socket)
+    # @async decision_making(localization_state_channel, perception_state_channel, map_segments, socket)
+    @async decision_making(localization_state_channel, perception_state_channel, map_segments, socket, targets, control_state)
 
 
     @info gps_channel, imu_channel
@@ -390,5 +410,5 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
     # @async localize(gps_channel, imu_channel, localization_state_channel)
     #@async test_localization(gt_channel, localization_state_channel)
     #@async perception(cam_channel, localization_state_channel, perception_state_channel)
-    errormonitor(@async decision_making(localization_state_channel, map_segments, socket, targets, control_state))
+    errormonitor(@async decision_making(localization_state_channel, perception_state_channel, map_segments, socket, targets, control_state))
 end
