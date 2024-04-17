@@ -7,8 +7,8 @@ end
 
 
 struct MyPerceptionType
-    field1::Int
-    field2::Float64
+    detectedObjects::Vector{TitanAVStack.DetectedObject}
+    timestamp::Float64
 end
 
 # mutable struct ControlState
@@ -83,13 +83,13 @@ function localize(gt_channel::Channel{GroundTruthMeasurement}, localization_stat
                     angular_velocity # Ground truth angular velocity
                 )
 
-                @info "Putting data to localization_state_channel"
+                #@info "Putting data to localization_state_channel"
                 if isready(localization_state_channel)
                     take!(localization_state_channel)  # Clear the channel if full
                 end
 
                 put!(localization_state_channel, localized_state)
-                @info "Data put to localization_state_channel"
+                #@info "Data put to localization_state_channel"
             else
                 sleep(0.1)  # Adjust the timing based on your system's needs
             end
@@ -196,11 +196,14 @@ function decision_making(localization_state_channel, perception_state_channel, m
                 latest_localization_state = fetch(localization_state_channel)
                 latest_perception_state = fetch(perception_state_channel)
 
+                # Ensure the data fetched logs correctly and accesses the appropriate fields
                 @info "Data fetched from channels" localization_data=latest_localization_state.position perception_data=length(latest_perception_state.detectedObjects)
 
+                # Process orientation data to get a yaw angle
                 yaw = extract_yaw_from_quaternion(latest_localization_state.orientation)
                 @info "Processed yaw from orientation" yaw=yaw
 
+                # Identify the current road segment based on localization dataexit
                 current_segment_id = find_current_segment(latest_localization_state.position[1:2], map_segments)
                 if current_segment_id == -1
                     @error "No segment found for position" position=latest_localization_state.position
@@ -234,6 +237,7 @@ function decision_making(localization_state_channel, perception_state_channel, m
         end
     end
 end
+
 
 
 
@@ -424,6 +428,10 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
 
     targets = 51
     control_state = ControlState()
+
+    perception_channel = Channel{PerceptionState}(100)  # Assuming a channel capacity of 100
+    start_channel_manager(perception_channel)  # Starts the management task
+
     errormonitor(@async localize(gt_channel, localization_state_channel))
     # @async localize(gps_channel, imu_channel, localization_state_channel)
     # @async test_localization(gt_channel, localization_state_channel)

@@ -10,41 +10,78 @@ function perp(x)
 end
 
 struct InitialRay <: PolylineSegment
-    point::SVector{2, Float64}
-    tangent::SVector{2, Float64}
-    normal::SVector{2, Float64}
+    point::MVector{2, Float64}
+    tangent::MVector{2, Float64}
+    normal::MVector{2, Float64}
     function InitialRay(point, next_point)
-        tangent = next_point - point
-        tangent ./= norm(tangent)
-        normal = perp(tangent)
-        new(point, tangent, normal)
+        tangent = MVector(next_point - point...)
+        normalize!(tangent)  # Now possible because tangent is mutable
+        normal = MVector(perp(tangent)...)
+        new(MVector(point...), tangent, normal)
     end
 end
 
 struct TerminalRay <: PolylineSegment
-    point::SVector{2, Float64}
-    tangent::SVector{2, Float64}
-    normal::SVector{2, Float64}
+    point::MVector{2, Float64}
+    tangent::MVector{2, Float64}
+    normal::MVector{2, Float64}
     function TerminalRay(point, prev_point)
-        tangent = point - prev_point
-        tangent ./= norm(tangent)
-        normal = perp(tangent)
-        new(point, tangent, normal)
+        tangent = MVector(point - prev_point...)
+        normalize!(tangent)  # Now possible because tangent is mutable
+        normal = MVector(perp(tangent)...)
+        new(MVector(point...), tangent, normal)
     end
 end
 
 struct StandardSegment <: PolylineSegment
-    p1::SVector{2, Float64}
-    p2::SVector{2, Float64}
-    tangent::SVector{2, Float64}
-    normal::SVector{2, Float64}
+    p1::MVector{2, Float64}
+    p2::MVector{2, Float64}
+    tangent::MVector{2, Float64}
+    normal::MVector{2, Float64}
     function StandardSegment(p1, p2)
-        tangent = p2 - p1
-        tangent ./= norm(tangent)
-        normal = perp(tangent)
-        new(p1, p2, tangent, normal)
+        tangent = MVector(p2 - p1...)
+        normalize!(tangent)  # Now possible because tangent is mutable
+        normal = MVector(perp(tangent)...)
+        new(MVector(p1...), MVector(p2...), tangent, normal)
     end
 end
+
+# struct InitialRay <: PolylineSegment
+#     point::SVector{2, Float64}
+#     tangent::SVector{2, Float64}
+#     normal::SVector{2, Float64}
+#     function InitialRay(point, next_point)
+#         tangent = next_point - point
+#         tangent ./= norm(tangent)
+#         normal = perp(tangent)
+#         new(point, tangent, normal)
+#     end
+# end
+
+# struct TerminalRay <: PolylineSegment
+#     point::SVector{2, Float64}
+#     tangent::SVector{2, Float64}
+#     normal::SVector{2, Float64}
+#     function TerminalRay(point, prev_point)
+#         tangent = point - prev_point
+#         tangent ./= norm(tangent)
+#         normal = perp(tangent)
+#         new(point, tangent, normal)
+#     end
+# end
+
+# struct StandardSegment <: PolylineSegment
+#     p1::SVector{2, Float64}
+#     p2::SVector{2, Float64}
+#     tangent::SVector{2, Float64}
+#     normal::SVector{2, Float64}
+#     function StandardSegment(p1, p2)
+#         tangent = p2 - p1
+#         tangent ./= norm(tangent)
+#         normal = perp(tangent)
+#         new(p1, p2, tangent, normal)
+#     end
+# end
 
 struct Polyline
     segments::Vector{PolylineSegment}
@@ -64,7 +101,6 @@ struct Polyline
     end
 end
 
-# Perception data structs
 struct DetectedObject
     position::SVector{3, Float64}
     dimensions::SVector{3, Float64}
@@ -72,10 +108,11 @@ struct DetectedObject
     polyline::Polyline
 end
 
-struct PerceptionState
+struct MyPerceptionType
     detectedObjects::Vector{DetectedObject}
     timestamp::Float64
 end
+
 
 # Function to process camera data and generate detected objects with polylines
 function process_camera_data(camera_data)
@@ -96,7 +133,7 @@ function process_camera_data(camera_data)
             continue
         end
 
-        points = [SVector{2, Float64}(rand(), rand()) for _ in 1:5]  # Dummy points
+        points = [SVector{2, Float64}(rand(), rand()) for _ in 1:5] # fill in
         polyline = Polyline(points)
         detected_object = DetectedObject(position, dimensions, "vehicle", polyline)
         push!(detected_objects, detected_object)
@@ -141,6 +178,34 @@ function update_perception_state(perception_channel::Channel{PerceptionState}, c
         end
     end
 end
+
+# Function to clear the perception channel if it's nearly full
+function manage_perception_channel(perception_channel::Channel{PerceptionState})
+    # Set a threshold for when to start clearing the channel (e.g., when it's 90% full)
+    threshold = 0.9
+    while true
+        if length(perception_channel) > threshold * capacity(perception_channel)
+            # Clearing the channel by consuming all items
+            while isready(perception_channel)
+                take!(perception_channel)  # This removes items from the channel
+            end
+            @info "Perception channel cleared to prevent overflow."
+        end
+        sleep(0.1)  # Adjust the sleep time based on the expected rate of data flow
+    end
+end
+
+# start the channel management in an asynchronous task
+function start_channel_manager(perception_channel::Channel{PerceptionState})
+    @async manage_perception_channel(perception_channel)
+end
+
+function display_detected_objects(perception_state::MyPerceptionType)
+    for obj in perception_state.detectedObjects
+        println("Detected object at position: ", obj.position)
+    end
+end
+
 
 function start_perception_system()
     cam_channel = Channel{CameraMeasurement}(10)
