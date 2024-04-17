@@ -2,38 +2,95 @@ using Serialization
 using Sockets
 using StaticArrays
 
-# Structs to represent perception data, possibly could include bounding boxes,
-# detected objects, etc., as detected and processed from camera and other sensor data.
-struct DetectedObject
-    position::SVector{3, Float64}  # 3D position
-    dimensions::SVector{3, Float64}  # Width, Length, Height
-    objectType::String  # Type of object, e.g., "vehicle", "pedestrian"
-    polyline::Polyline  # Add this to represent linear features as polylines
+# polyline and segment structures hw3
+abstract type PolylineSegment end
+
+function perp(x)
+    [-x[2], x[1]]
 end
 
+struct InitialRay <: PolylineSegment
+    point::SVector{2, Float64}
+    tangent::SVector{2, Float64}
+    normal::SVector{2, Float64}
+    function InitialRay(point, next_point)
+        tangent = next_point - point
+        tangent ./= norm(tangent)
+        normal = perp(tangent)
+        new(point, tangent, normal)
+    end
+end
+
+struct TerminalRay <: PolylineSegment
+    point::SVector{2, Float64}
+    tangent::SVector{2, Float64}
+    normal::SVector{2, Float64}
+    function TerminalRay(point, prev_point)
+        tangent = point - prev_point
+        tangent ./= norm(tangent)
+        normal = perp(tangent)
+        new(point, tangent, normal)
+    end
+end
+
+struct StandardSegment <: PolylineSegment
+    p1::SVector{2, Float64}
+    p2::SVector{2, Float64}
+    tangent::SVector{2, Float64}
+    normal::SVector{2, Float64}
+    function StandardSegment(p1, p2)
+        tangent = p2 - p1
+        tangent ./= norm(tangent)
+        normal = perp(tangent)
+        new(p1, p2, tangent, normal)
+    end
+end
+
+struct Polyline
+    segments::Vector{PolylineSegment}
+    function Polyline(points)
+        segments = Vector{PolylineSegment}()
+        N = length(points)
+        @assert N ≥ 2
+        initial_ray = InitialRay(points[1], points[2])
+        push!(segments, initial_ray)
+        for i = 1:(N-1)
+            seg = StandardSegment(points[i], points[i+1])
+            push!(segments, seg)
+        end
+        terminal_ray = TerminalRay(points[end], points[end-1])
+        push!(segments, terminal_ray)
+        new(segments)
+    end
+end
+
+# Perception data structs
+struct DetectedObject
+    position::SVector{3, Float64}
+    dimensions::SVector{3, Float64}
+    objectType::String
+    polyline::Polyline
+end
 
 struct PerceptionState
     detectedObjects::Vector{DetectedObject}
     timestamp::Float64
 end
 
-# This function processes camera measurements to detect objects
+# Function to process camera data and generate detected objects with polylines
 function process_camera_data(camera_data)
     detected_objects = DetectedObject[]
     for bbox in camera_data.bounding_boxes
-        # Example dummy position and dimensions based on bounding box
         position = SVector{3, Float64}(rand(), rand(), 0.0)
         dimensions = SVector{3, Float64}(bbox[3] - bbox[1], bbox[4] - bbox[2], 2.0)
-        # Construct a polyline from detected points (simplified example)
-        points = [SVector{2, Float64}(rand(), rand()) for _ in 1:5]  # Dummy points
+        points = [SVector{2, Float64}(rand(), rand()) for _ in 1:5]  # Dummy points for demonstration
         polyline = Polyline(points)
-        push!(detected_objects, DetectedObject(position, dimensions, "lane_boundary", polyline))
+        push!(detected_objects, DetectedObject(position, dimensions, "vehicle", polyline))
     end
     detected_objects
 end
 
-
-# Main function to process incoming sensor data and update perception state
+# Function to update the perception state with new data from the camera channel
 function update_perception_state(perception_channel::Channel{PerceptionState}, cam_channel::Channel{CameraMeasurement})
     while true
         if isready(cam_channel)
@@ -43,21 +100,11 @@ function update_perception_state(perception_channel::Channel{PerceptionState}, c
             perception_state = PerceptionState(detected_objects, timestamp)
             put!(perception_channel, perception_state)
         end
-        sleep(0.001)  # Adjust sleep time based on expected data rate
+        sleep(0.001)
     end
 end
 
-# Add to perception.jl
-function update_perception_with_polylines(camera_data)
-    detected_objects = process_camera_data(camera_data)  # Existing function
-    # Add logic to create polylines from detected features
-    for obj in detected_objects
-        obj.polyline = create_polyline_from_features(obj.features)  # Define this function based on your feature detection logic
-    end
-end
-
-
-# Example function to initialize channels and start the perception processing task
+# Function to initialize channels and start the perception processing task
 function start_perception_system()
     cam_channel = Channel{CameraMeasurement}(10)
     perception_channel = Channel{PerceptionState}(10)
