@@ -7,8 +7,8 @@ end
 
 
 struct MyPerceptionType
-    field1::Int
-    field2::Float64
+    detectedObjects::Vector{TitanAVStack.DetectedObject}
+    timestamp::Float64
 end
 
 # mutable struct ControlState
@@ -83,13 +83,13 @@ function localize(gt_channel::Channel{GroundTruthMeasurement}, localization_stat
                     angular_velocity # Ground truth angular velocity
                 )
 
-                @info "Putting data to localization_state_channel"
+                #@info "Putting data to localization_state_channel"
                 if isready(localization_state_channel)
                     take!(localization_state_channel)  # Clear the channel if full
                 end
 
                 put!(localization_state_channel, localized_state)
-                @info "Data put to localization_state_channel"
+                #@info "Data put to localization_state_channel"
             else
                 sleep(0.1)  # Adjust the timing based on your system's needs
             end
@@ -182,10 +182,10 @@ end
 #                 sleep(0.1)
 #             end
 #         catch e
-#             @error "An error occurred during the decision making process" exception=(e, catch_backtrace())
-#         end
-#     end
-# end
+# #             @error "An error occurred during the decision making process" exception=(e, catch_backtrace())
+# #         end
+# #     end
+# # end
 
 function decision_making(localization_state_channel, perception_state_channel, map_segments, socket, target_road_segment_id, control_state::ControlState)
     @info "Decision making task started..."
@@ -196,11 +196,14 @@ function decision_making(localization_state_channel, perception_state_channel, m
                 latest_localization_state = fetch(localization_state_channel)
                 latest_perception_state = fetch(perception_state_channel)
 
+                # Ensure the data fetched logs correctly and accesses the appropriate fields
                 @info "Data fetched from channels" localization_data=latest_localization_state.position perception_data=length(latest_perception_state.detectedObjects)
 
+                # Process orientation data to get a yaw angle
                 yaw = extract_yaw_from_quaternion(latest_localization_state.orientation)
                 @info "Processed yaw from orientation" yaw=yaw
 
+                # Identify the current road segment based on localization dataexit
                 current_segment_id = find_current_segment(latest_localization_state.position[1:2], map_segments)
                 if current_segment_id == -1
                     @error "No segment found for position" position=latest_localization_state.position
@@ -236,93 +239,73 @@ function decision_making(localization_state_channel, perception_state_channel, m
     @info "Perception out!!"
 end
 
-#                 @info "Current segment found" segment_id=current_segment_id
-#                 path = shortest_path(current_segment_id, target_road_segment_id, map_segments)
-#                 if isempty(path)
-#                     @warn "No path found" current_segment_id
+# function decision_making(localization_state_channel, perception_state_channel, map_segments, socket, target_road_segment_id, control_state::ControlState)
+#     @info "Decision making task started..."
+#     while true
+#         try
+#             # Wait until both localization and perception data are available
+#             if isready(localization_state_channel) && isready(perception_state_channel)
+#                 latest_localization_state = fetch(localization_state_channel)
+#                 @info "Finding current segment..."
+#                 latest_localization_state.position
+#                 yaw = extract_yaw_from_quaternion(latest_localization_state.orientation)
+#                 current_segment_id = find_current_segment(latest_localization_state.position[1:2], map_segments)
+#                 if current_segment_id == -1
+#                     @error "No segment found for position"
+#                     latest_localization_state.position
+#                     sleep(1)
 #                     continue
 #                 end
+#                 @info "Current segment found"
+#                 @info current_segment_id
+#                 segment_id = current_segment_id
+#                 path = shortest_path(current_segment_id, target_road_segment_id, map_segments)
+#                 if isempty(path)
+#                     @warn "No path found"
+#                     current_segment_id
+#                     continue
+#                 end
+#                 @info "Navigating through path..."
+#                 length(path)
+#                 @info path
 
-#                 @info "Navigating through path..." length(path)
+#                 # Get the lookahead segments
+#                 # lookahead_segments = Vector{VehicleSim.RoadSegment}()
+#                 # for i in 2:length(path)
+#                 #     push!(lookahead_segments, map_segments[path[i]])
+#                 # end
+
 #                 for segment_id in path
-#                     navigate_segment(map_segments[segment_id], latest_localization_state, yaw, socket, control_state) 
-#                 end                
+#                     segment = map_segments[segment_id]
+#                     while true
+#                         result = pure_pursuit_navigate(segment, localization_state_channel,latest_localization_state, socket, yaw)
+#                         if result === true
+#                             break  # Successfully navigated the segment
+#                         elseif result === false
+#                             sleep(0.1)  # Wait before trying to navigate the segment again
+#                         else
+#                             @error "Unexpected result from pure_pursuit_navigate" result
+#                             break
+#                         end
+#                     end
+#                 end
 #             else
-#                 @info "localization channel not ready"
-#                 sleep(0.1)
+#                 if !isready(localization_state_channel)
+#                     @info "Localization channel not ready"
+#                 end
+#                 if !isready(perception_state_channel)
+#                     @info "Perception channel not ready"
+#                 end
+#                 sleep(0.1)  # Wait briefly to check channel readiness again
 #             end
 #         catch e
 #             @error "An error occurred during the decision making process" exception=(e, catch_backtrace())
+#             sleep(1)  # Error recovery sleep
 #         end
+#         sleep(0.1)  # Check at a frequency appropriate for your application's safety requirements
 #     end
 # end
 
-function decision_making(localization_state_channel, perception_state_channel, map_segments, socket, target_road_segment_id, control_state::ControlState)
-    @info "Decision making task started..."
-    while true
-        try
-            # Wait until both localization and perception data are available
-            if isready(localization_state_channel) && isready(perception_state_channel)
-                latest_localization_state = fetch(localization_state_channel)
-                @info "Finding current segment..."
-                latest_localization_state.position
-                yaw = extract_yaw_from_quaternion(latest_localization_state.orientation)
-                current_segment_id = find_current_segment(latest_localization_state.position[1:2], map_segments)
-                if current_segment_id == -1
-                    @error "No segment found for position"
-                    latest_localization_state.position
-                    sleep(1)
-                    continue
-                end
-                @info "Current segment found"
-                @info current_segment_id
-                segment_id = current_segment_id
-                path = shortest_path(current_segment_id, target_road_segment_id, map_segments)
-                if isempty(path)
-                    @warn "No path found"
-                    current_segment_id
-                    continue
-                end
-                @info "Navigating through path..."
-                length(path)
-                @info path
-
-                # Get the lookahead segments
-                # lookahead_segments = Vector{VehicleSim.RoadSegment}()
-                # for i in 2:length(path)
-                #     push!(lookahead_segments, map_segments[path[i]])
-                # end
-
-                for segment_id in path
-                    segment = map_segments[segment_id]
-                    while true
-                        result = pure_pursuit_navigate(segment, localization_state_channel,latest_localization_state, socket, yaw)
-                        if result === true
-                            break  # Successfully navigated the segment
-                        elseif result === false
-                            sleep(0.1)  # Wait before trying to navigate the segment again
-                        else
-                            @error "Unexpected result from pure_pursuit_navigate" result
-                            break
-                        end
-                    end
-                end
-            else
-                if !isready(localization_state_channel)
-                    @info "Localization channel not ready"
-                end
-                if !isready(perception_state_channel)
-                    @info "Perception channel not ready"
-                end
-                sleep(0.1)  # Wait briefly to check channel readiness again
-            end
-        catch e
-            @error "An error occurred during the decision making process" exception=(e, catch_backtrace())
-            sleep(1)  # Error recovery sleep
-        end
-        sleep(0.1)  # Check at a frequency appropriate for your application's safety requirements
-    end
-end
 
 
 
@@ -341,11 +324,12 @@ function navigate_segment(segment, localization_state, yaw, socket, control_stat
     serialize(socket, cmd)
 end
 
-function monitor_vehicle_safety(perception_channel, vehicle_state_channel, control_channel)
+# fix localization part
+function monitor_vehicle_safety(perception_channel, localization_state_channel, control_channel)
     @info "Starting vehicle safety monitoring..."
     while true
         perception_state = fetch(perception_channel)
-        vehicle_state = fetch(vehicle_state_channel)
+        localization_state = fetch(localization_state_channel)
         
         for obj in perception_state.detectedObjects
             if obj.objectType == "obstacle"
@@ -450,7 +434,7 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
     gt_channel = Channel{GroundTruthMeasurement}(32)
 
     localization_state_channel = Channel{MyLocalizationType}(1)
-    perception_state_channel = Channel{MyPerceptionType}(1)
+    perception_state_channel = Channel{MyPerceptionType}(100)
 
     target_velocity = 0.0 
     steering_angle = 0.0
@@ -502,10 +486,15 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
     end)
 
     targets = 51
+    control_state = ControlState()
+    start_channel_manager(perception_state_channel)  # Starts the management task
+
     errormonitor(@async localize(gt_channel, localization_state_channel))
     #@async localize(gps_channel, imu_channel, localization_state_channel)
     #@async test_localization(gt_channel, localization_state_channel)
-    @async perception(cam_channel, localization_state_channel, perception_state_channel)
+    errormonitor(@async perception(cam_channel, localization_state_channel, perception_state_channel))
     # sleep(0.1)
-    errormonitor(@async decision_making(localization_state_channel, map_segments, socket, targets))
+    # errormonitor(@async decision_making(localization_state_channel, map_segments, socket, targets))
+    errormonitor(@async decision_making(localization_state_channel, perception_state_channel, map_segments, socket, target_road_segment_id, control_state::ControlState))
+
 end
