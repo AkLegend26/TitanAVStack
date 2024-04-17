@@ -2,7 +2,7 @@
 
 julia_version = "1.10.2"
 manifest_format = "2.0"
-project_hash = "245ef7fc16d68b8912e29a9402304afe4348aa5b"
+project_hash = "32ce9052261c08890531fc2ea731b535fa03a0db"
 
 [[deps.Adapt]]
 deps = ["LinearAlgebra", "Requires"]
@@ -821,11 +821,9 @@ version = "0.7.1"
 
 [[deps.MeshCat]]
 deps = ["Base64", "BinDeps", "Blink", "Cassette", "Colors", "CoordinateTransformations", "DocStringExtensions", "FFMPEG", "GeometryBasics", "LinearAlgebra", "Logging", "MsgPack", "Mux", "Parameters", "Pkg", "Requires", "Rotations", "Sockets", "StaticArrays", "UUIDs", "WebSockets"]
-git-tree-sha1 = "f6cbc841c70aed00b53d7139a0f531548267cd60"
-repo-rev = "master"
-repo-url = "https://github.com/forrestlaine/MeshCat.jl"
+git-tree-sha1 = "0ca67089520745398ad211a2b4141c8509d95bec"
 uuid = "283c5d60-a78f-5afe-a0af-af636b173e11"
-version = "0.14.2"
+version = "0.15.1"
 
 [[deps.MeshCatMechanisms]]
 deps = ["ColorTypes", "CoordinateTransformations", "GeometryBasics", "InteractBase", "Interpolations", "LoopThrottle", "MechanismGeometries", "MeshCat", "OrderedCollections", "RigidBodyDynamics"]
@@ -1001,6 +999,11 @@ deps = ["BitTwiddlingConvenienceFunctions", "CPUSummary", "IfElse", "Static", "T
 git-tree-sha1 = "43883d15c7cf16f340b9367c645cf88372f55641"
 uuid = "1d0040c9-8b98-4ee7-8388-3f51789ca0ad"
 version = "0.1.13"
+
+[[deps.PolygonInbounds]]
+git-tree-sha1 = "8d50c96f4ba5e1e2fd524116b4ef97b29d5f77da"
+uuid = "e4521ec6-8c1d-418e-9da2-b3bc4ae105d6"
+version = "0.2.0"
 
 [[deps.PreallocationTools]]
 deps = ["Adapt", "ArrayInterfaceCore", "ForwardDiff", "Requires"]
@@ -1396,7 +1399,9 @@ version = "0.21.58"
 
 [[deps.VehicleSim]]
 deps = ["ColorTypes", "Dates", "GeometryBasics", "Infiltrator", "LinearAlgebra", "MeshCat", "MeshCatMechanisms", "OrdinaryDiffEq", "Random", "Revise", "RigidBodyDynamics", "Rotations", "Serialization", "Sockets", "SparseArrays", "StaticArrays", "Suppressor"]
-path = "/Users/ryanmccord/.julia/dev/VehicleSim"
+git-tree-sha1 = "c6d310be0e2818b5ee2038cef6e1cfb508f9dd5b"
+repo-rev = "main"
+repo-url = "https://github.com/VAMPIR-Lab/VehicleSim"
 uuid = "e0769fa5-244c-4558-b677-4a3334c4b6a3"
 version = "0.1.0"
 
