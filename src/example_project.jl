@@ -83,13 +83,13 @@ function localize(gt_channel::Channel{GroundTruthMeasurement}, localization_stat
                     angular_velocity # Ground truth angular velocity
                 )
 
-                # Ensure the localization state channel is not full before putting new data
+                @info "Putting data to localization_state_channel"
                 if isready(localization_state_channel)
                     take!(localization_state_channel)  # Clear the channel if full
                 end
 
                 put!(localization_state_channel, localized_state)
-                @info "Published ground truth localization state."
+                @info "Data put to localization_state_channel"
             else
                 sleep(0.1)  # Adjust the timing based on your system's needs
             end
@@ -236,11 +236,33 @@ function decision_making(localization_state_channel, perception_state_channel, m
     @info "Perception out!!"
 end
 
-function decision_making(localization_state_channel, map_segments, socket, target_road_segment_id, control_state::ControlState)
+#                 @info "Current segment found" segment_id=current_segment_id
+#                 path = shortest_path(current_segment_id, target_road_segment_id, map_segments)
+#                 if isempty(path)
+#                     @warn "No path found" current_segment_id
+#                     continue
+#                 end
+
+#                 @info "Navigating through path..." length(path)
+#                 for segment_id in path
+#                     navigate_segment(map_segments[segment_id], latest_localization_state, yaw, socket, control_state) 
+#                 end                
+#             else
+#                 @info "localization channel not ready"
+#                 sleep(0.1)
+#             end
+#         catch e
+#             @error "An error occurred during the decision making process" exception=(e, catch_backtrace())
+#         end
+#     end
+# end
+
+function decision_making(localization_state_channel, perception_state_channel, map_segments, socket, target_road_segment_id, control_state::ControlState)
     @info "Decision making task started..."
     while true
         try
-            if isready(localization_state_channel)
+            # Wait until both localization and perception data are available
+            if isready(localization_state_channel) && isready(perception_state_channel)
                 latest_localization_state = fetch(localization_state_channel)
                 @info "Finding current segment..."
                 latest_localization_state.position
@@ -286,15 +308,58 @@ function decision_making(localization_state_channel, map_segments, socket, targe
                     end
                 end
             else
-                @info "localization channel not ready"
-                sleep(0.1)
+                if !isready(localization_state_channel)
+                    @info "Localization channel not ready"
+                end
+                if !isready(perception_state_channel)
+                    @info "Perception channel not ready"
+                end
+                sleep(0.1)  # Wait briefly to check channel readiness again
             end
         catch e
             @error "An error occurred during the decision making process" exception=(e, catch_backtrace())
+            sleep(1)  # Error recovery sleep
         end
         sleep(0.1)  # Check at a frequency appropriate for your application's safety requirements
     end
 end
+
+
+
+function navigate_segment(segment, localization_state, yaw, socket, control_state, perception_state)
+    # Placeholder for actual navigation logic
+    # Example: Use perception data to avoid obstacles
+    if !isempty(perception_state.detectedObjects)
+        # Logic to modify driving commands based on perceived objects
+    end
+
+    # Example driving commands based on the segment and localization data
+    steering_angle = compute_steering_angle(segment, localization_state, yaw)
+    target_vel = compute_target_velocity(segment, localization_state)
+
+    cmd = (steering_angle, target_vel, true)
+    serialize(socket, cmd)
+end
+
+function monitor_vehicle_safety(perception_channel, vehicle_state_channel, control_channel)
+    @info "Starting vehicle safety monitoring..."
+    while true
+        perception_state = fetch(perception_channel)
+        vehicle_state = fetch(vehicle_state_channel)
+        
+        for obj in perception_state.detectedObjects
+            if obj.objectType == "obstacle"
+                collision_risk = check_collisions(vehicle_state, obj)
+                if collision_risk.is_risky
+                    take_preventive_action(control_channel, collision_risk)  # Implement actions based on risk assessment
+                end
+            end
+        end
+        sleep(0.1)  # Check at a frequency appropriate for your application's safety requirements
+    end
+end
+
+
 
 function isfull(ch::Channel)
     length(ch.data) ≥ ch.sz_max
