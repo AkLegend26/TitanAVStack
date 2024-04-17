@@ -83,13 +83,13 @@ function localize(gt_channel::Channel{GroundTruthMeasurement}, localization_stat
                     angular_velocity # Ground truth angular velocity
                 )
 
-                # Ensure the localization state channel is not full before putting new data
+                @info "Putting data to localization_state_channel"
                 if isready(localization_state_channel)
                     take!(localization_state_channel)  # Clear the channel if full
                 end
 
                 put!(localization_state_channel, localized_state)
-                @info "Published ground truth localization state."
+                @info "Data put to localization_state_channel"
             else
                 sleep(0.1)  # Adjust the timing based on your system's needs
             end
@@ -100,22 +100,31 @@ function localize(gt_channel::Channel{GroundTruthMeasurement}, localization_stat
     end
 end
 
+
 function perception(cam_meas_channel, localization_state_channel, perception_state_channel)
     while true
-        fresh_cam_meas = []
-        while isready(cam_meas_channel)
-            meas = take!(cam_meas_channel)
-            push!(fresh_cam_meas, meas)
+        if isready(cam_meas_channel)
+            cam_data = take!(cam_meas_channel)
+            @info "Camera data received for processing."
+            detected_objects = process_camera_data(cam_data)
+            if isempty(detected_objects)
+                @info "No objects detected, skipping."
+                continue
+            end
+            timestamp = cam_data.time  # Make sure the timestamp is correctly retrieved
+            perception_state = MyPerceptionType(detected_objects, timestamp)
+            put!(perception_state_channel, perception_state)
+            @info "Perception data processed and put to channel."
+        else
+            @info "No camera measurements received, sleeping..."
+            sleep(0.1)
         end
-
-        # Process camera data and update perception state
-        detected_objects = process_camera_data(fresh_cam_meas)
-        latest_localization_state = fetch(localization_state_channel)
-        
-        perception_state = MyPerceptionType(detected_objects, timestamp())
-        put!(perception_state_channel, perception_state)
+        # Optional: Check if channels are synchronized
+        @info "Checking channel statuses", isready(localization_state_channel), isready(perception_state_channel)
     end
 end
+
+
 
 # function perception(cam_meas_channel, localization_state_channel, perception_state_channel)
 #     @info "Perception..."
@@ -187,37 +196,46 @@ function decision_making(localization_state_channel, perception_state_channel, m
                 latest_localization_state = fetch(localization_state_channel)
                 latest_perception_state = fetch(perception_state_channel)
 
-                @info "Finding current segment..." latest_localization_state.position
-                yaw = extract_yaw_from_quaternion(latest_localization_state.orientation)
+                @info "Data fetched from channels" localization_data=latest_localization_state.position perception_data=length(latest_perception_state.detectedObjects)
 
-                # Determine the current segment based on the localization state
+                yaw = extract_yaw_from_quaternion(latest_localization_state.orientation)
+                @info "Processed yaw from orientation" yaw=yaw
+
                 current_segment_id = find_current_segment(latest_localization_state.position[1:2], map_segments)
                 if current_segment_id == -1
-                    @error "No segment found for position" latest_localization_state.position
-                    sleep(1)
+                    @error "No segment found for position" position=latest_localization_state.position
+                    sleep(1)  # Sleep before next attempt to give time for system state change
                     continue
                 end
 
-                @info "Current segment found" segment_id=current_segment_id
+                @info "Current segment identified" segment_id=current_segment_id
                 path = shortest_path(current_segment_id, target_road_segment_id, map_segments)
                 if isempty(path)
-                    @warn "No path found" current_segment_id
+                    @warn "Pathfinding returned no path" current_segment_id=current_segment_id
                     continue
                 end
 
-                @info "Navigating through path..." length(path)
+                @info "Path found, navigating segments" path_length=length(path)
                 for segment_id in path
                     navigate_segment(map_segments[segment_id], latest_localization_state, yaw, socket, control_state, latest_perception_state)
                 end
             else
-                @info "Waiting for localization and perception channels to be ready"
-                sleep(0.1)
+                if !isready(localization_state_channel)
+                    @info "Localization channel not ready"
+                end
+                if !isready(perception_state_channel)
+                    @info "Perception channel not ready"
+                end
+                sleep(0.1)  # Wait briefly to check channel readiness again
             end
         catch e
             @error "An error occurred during the decision making process" exception=(e, catch_backtrace())
+            sleep(1)  # Error recovery sleep
         end
     end
 end
+
+
 
 function navigate_segment(segment, localization_state, yaw, socket, control_state, perception_state)
     # Placeholder for actual navigation logic
@@ -445,3 +463,16 @@ function try_fetch_with_timeout(channel, timeout)
     end
     return nothing  # Timeout response
 end
+
+function monitor_perception_channel(channel)
+    while true
+        if isready(channel)
+            data = take!(channel)
+            @info "Data retrieved from perception channel" data
+        else
+            @info "Perception channel is empty or not ready"
+        end
+        sleep(1)  # Adjust sleep time based on expected data frequency
+    end
+end
+
