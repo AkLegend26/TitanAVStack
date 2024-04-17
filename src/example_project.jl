@@ -102,25 +102,136 @@ end
 
 
 function perception(cam_meas_channel, localization_state_channel, perception_state_channel)
-    @info "Perception..."
-    # set up stuff
     while true
-        sleep(0.001)
-        fresh_cam_meas = []
-        while isready(cam_meas_channel)
-            meas = take!(cam_meas_channel)
-            push!(fresh_cam_meas, meas)
+        if isready(cam_meas_channel)
+            cam_data = take!(cam_meas_channel)
+            @info "Camera data received for processing."
+            detected_objects = process_camera_data(cam_data)
+            if isempty(detected_objects)
+                @info "No objects detected, skipping."
+                continue
+            end
+            timestamp = cam_data.time  # Make sure the timestamp is correctly retrieved
+            perception_state = MyPerceptionType(detected_objects, timestamp)
+            put!(perception_state_channel, perception_state)
+            @info "Perception data processed and put to channel."
+        else
+            @info "No camera measurements received, sleeping..."
+            sleep(0.1)
         end
+        # Optional: Check if channels are synchronized
+        @info "Checking channel statuses", isready(localization_state_channel), isready(perception_state_channel)
+    end
+end
 
-        latest_localization_state = fetch(localization_state_channel)
+
+
+# function perception(cam_meas_channel, localization_state_channel, perception_state_channel)
+#     @info "Perception..."
+#     # set up stuff
+#     while true
+#         sleep(0.001)
+#         fresh_cam_meas = []
+#         while isready(cam_meas_channel)
+#             meas = take!(cam_meas_channel)
+#             push!(fresh_cam_meas, meas)
+#         end
+
+#         latest_localization_state = fetch(localization_state_channel)
         
-        # process bounding boxes / run ekf / do what you think is good
+#         # process bounding boxes / run ekf / do what you think is good
 
-        perception_state = MyPerceptionType(0,0.0)
-        if isready(perception_state_channel)
-            take!(perception_state_channel)
+#         perception_state = MyPerceptionType(0,0.0)
+#         if isready(perception_state_channel)
+#             take!(perception_state_channel)
+#         end
+#         put!(perception_state_channel, perception_state)
+#     end
+#     @info "Perception out!!"
+# end
+
+# function decision_making(localization_state_channel, map_segments, socket, target_road_segment_id, control_state::ControlState)
+#     @info "Decision making task started..."
+#     while true 
+#         try
+#             if isready(localization_state_channel)
+#                 latest_localization_state = fetch(localization_state_channel)
+#                 @info "Finding current segment..." latest_localization_state.position
+#                 yaw = extract_yaw_from_quaternion(latest_localization_state.orientation)
+
+#                 current_segment_id = find_current_segment(latest_localization_state.position[1:2], map_segments)
+#                 if current_segment_id == -1
+#                     @error "No segment found for position" latest_localization_state.position
+#                     sleep(1)
+#                     continue
+#                 end
+
+#                 @info "Current segment found" segment_id=current_segment_id
+#                 path = shortest_path(current_segment_id, target_road_segment_id, map_segments)
+#                 if isempty(path)
+#                     @warn "No path found" current_segment_id
+#                     continue
+#                 end
+
+#                 @info "Navigating through path..." length(path)
+#                 for segment_id in path
+#                     navigate_segment(map_segments[segment_id], latest_localization_state, yaw, socket, control_state) 
+#                 end                
+#             else
+#                 @info "localization channel not ready"
+#                 sleep(0.1)
+#             end
+#         catch e
+#             @error "An error occurred during the decision making process" exception=(e, catch_backtrace())
+#         end
+#     end
+# end
+
+function decision_making(localization_state_channel, perception_state_channel, map_segments, socket, target_road_segment_id, control_state::ControlState)
+    @info "Decision making task started..."
+    while true
+        try
+            # Wait until both localization and perception data are available
+            if isready(localization_state_channel) && isready(perception_state_channel)
+                latest_localization_state = fetch(localization_state_channel)
+                latest_perception_state = fetch(perception_state_channel)
+
+                @info "Data fetched from channels" localization_data=latest_localization_state.position perception_data=length(latest_perception_state.detectedObjects)
+
+                yaw = extract_yaw_from_quaternion(latest_localization_state.orientation)
+                @info "Processed yaw from orientation" yaw=yaw
+
+                current_segment_id = find_current_segment(latest_localization_state.position[1:2], map_segments)
+                if current_segment_id == -1
+                    @error "No segment found for position" position=latest_localization_state.position
+                    sleep(1)  # Sleep before next attempt to give time for system state change
+                    continue
+                end
+
+                @info "Current segment identified" segment_id=current_segment_id
+                path = shortest_path(current_segment_id, target_road_segment_id, map_segments)
+                if isempty(path)
+                    @warn "Pathfinding returned no path" current_segment_id=current_segment_id
+                    continue
+                end
+
+                @info "Path found, navigating segments" path_length=length(path)
+                for segment_id in path
+                    navigate_segment(map_segments[segment_id], latest_localization_state, yaw, socket, control_state, latest_perception_state)
+                end
+            else
+                if !isready(localization_state_channel)
+                    @info "Localization channel not ready"
+                end
+                if !isready(perception_state_channel)
+                    @info "Perception channel not ready"
+                end
+                sleep(0.1)  # Wait briefly to check channel readiness again
+            end
+        catch e
+            @error "An error occurred during the decision making process" exception=(e, catch_backtrace())
+            sleep(1)  # Error recovery sleep
         end
-        put!(perception_state_channel, perception_state)
     end
     @info "Perception out!!"
 end
@@ -181,6 +292,7 @@ function decision_making(localization_state_channel, map_segments, socket, targe
         catch e
             @error "An error occurred during the decision making process" exception=(e, catch_backtrace())
         end
+        sleep(0.1)  # Check at a frequency appropriate for your application's safety requirements
     end
 end
 

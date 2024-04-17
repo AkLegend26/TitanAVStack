@@ -22,6 +22,7 @@ mutable struct ControlState
 end
 
 include("Routing.jl")
+include("perception.jl")
 include("control.jl")
 include("decision_making.jl")
 include("client.jl")

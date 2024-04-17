@@ -244,6 +244,10 @@ function calculate_curve_angles(center, pt_a, pt_b)
     else
         return angle_a, angle_b
     end
+    pos = SVector{2, Float64}(position[1], position[2])
+    adjusted_position = pos + SVector{2, Float64}(7*cos(yaw), 7*sin(yaw))
+    #@info "Adjusted position based on yaw" original_position=pos adjusted_position=adjusted_position yaw=yaw
+    return adjusted_position
 end
 
 # function navigate_segment(segment, state, yaw, socket)

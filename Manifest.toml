@@ -2,7 +2,7 @@
 
 julia_version = "1.10.2"
 manifest_format = "2.0"
-project_hash = "dbf64db1b6ed53b7d0fa5480e457dd2b088da8ae"
+project_hash = "32ce9052261c08890531fc2ea731b535fa03a0db"
 
 [[deps.Adapt]]
 deps = ["LinearAlgebra", "Requires"]
@@ -1399,7 +1399,7 @@ version = "0.21.58"
 
 [[deps.VehicleSim]]
 deps = ["ColorTypes", "Dates", "GeometryBasics", "Infiltrator", "LinearAlgebra", "MeshCat", "MeshCatMechanisms", "OrdinaryDiffEq", "Random", "Revise", "RigidBodyDynamics", "Rotations", "Serialization", "Sockets", "SparseArrays", "StaticArrays", "Suppressor"]
-git-tree-sha1 = "c6d310be0e2818b5ee2038cef6e1cfb508f9dd5b"
+git-tree-sha1 = "6fc1c7c8ee2828c7b74d8d4a898ad5599006e550"
 repo-rev = "main"
 repo-url = "https://github.com/VAMPIR-Lab/VehicleSim"
 uuid = "e0769fa5-244c-4558-b677-4a3334c4b6a3"
