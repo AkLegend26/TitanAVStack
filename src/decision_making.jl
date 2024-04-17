@@ -37,7 +37,7 @@ function find_current_segment(position, map_segments)
     end
 
     if best_segment_id != -1
-        #@info "Segment found: $best_segment_id"
+        @info "Segment found: $best_segment_id"
         return best_segment_id
     else
         #@error "No current segment found for position: $position"
@@ -46,7 +46,7 @@ function find_current_segment(position, map_segments)
 end
 
 function check_segment(position, segment)
-    #@info "Checking segment: $segment"
+    #@info "Checking segment: $(segment.id)" position=position segment_boundaries=segment.lane_boundaries
     if segment.lane_boundaries[1].curvature != 0
         return check_curved_segment(position, segment)
     else
@@ -90,6 +90,30 @@ function check_curved_segment(position, segment)
     within_radius = radius * 0.9 <= distance <= radius * 1.1
 
     return within_angle && within_radius, distance - radius
+end
+
+function calculate_curve_center(boundary)
+    pt_a, pt_b = boundary.pt_a, boundary.pt_b
+    midpoint = (pt_a + pt_b) / 2
+    vec = pt_b - pt_a
+    perpendicular = [vec[2], -vec[1]]  # Rotate vector 90 degrees
+    
+    # Determine the direction based on the sign of curvature
+    direction = sign(boundary.curvature)
+    radius = abs(1.0 / boundary.curvature)
+    
+    # Center is `radius` distance away from midpoint in the direction of the perpendicular vector
+    if direction != 0
+        norm_perpendicular = normalize(perpendicular)
+        center = midpoint + norm_perpendicular * radius * direction
+        return center
+    else
+        return midpoint  # This should not happen for curved roads
+    end
+end
+
+function calculate_curve_radius(boundary)
+    return abs(1.0 / boundary.curvature)
 end
 
 function is_within_angle(pt_a, pt_b, center, angle)
@@ -208,43 +232,19 @@ function adjust_position_based_on_yaw(position, yaw)
     return adjusted_position
 end
 
-function calculate_curve_center(boundary)
-    pt_a, pt_b = boundary.pt_a, boundary.pt_b
-    midpoint = (pt_a + pt_b) / 2
-    vec = pt_b - pt_a
-    perpendicular = [vec[2], -vec[1]]  # Rotate vector 90 degrees
+# function calculate_curve_angles(center, pt_a, pt_b)
+#     vec_a = pt_a - center
+#     vec_b = pt_b - center
+#     angle_a = atan(vec_a[2], vec_a[1])
+#     angle_b = atan(vec_b[2], vec_b[1])
     
-    # Determine the direction based on the sign of curvature
-    direction = sign(boundary.curvature)
-    radius = abs(1.0 / boundary.curvature)
-    
-    # Center is `radius` distance away from midpoint in the direction of the perpendicular vector
-    if direction != 0
-        norm_perpendicular = normalize(perpendicular)
-        center = midpoint + norm_perpendicular * radius * direction
-        return center
-    else
-        return midpoint  # This should not happen for curved roads
-    end
-end
-
-function calculate_curve_radius(boundary)
-    return abs(1.0 / boundary.curvature)
-end
-
-function calculate_curve_angles(center, pt_a, pt_b)
-    vec_a = pt_a - center
-    vec_b = pt_b - center
-    angle_a = atan(vec_a[2], vec_a[1])
-    angle_b = atan(vec_b[2], vec_b[1])
-    
-    # Ensure angles are ordered correctly
-    if angle_a > angle_b
-        return angle_b, angle_a
-    else
-        return angle_a, angle_b
-    end
-end
+#     # Ensure angles are ordered correctly
+#     if angle_a > angle_b
+#         return angle_b, angle_a
+#     else
+#         return angle_a, angle_b
+#     end
+# end
 
 # function navigate_segment(segment, state, yaw, socket)
 #     if !isopen(socket)
@@ -391,15 +391,26 @@ function send_commands(steering_angle, velocity, socket)
 end
 
 function is_at_segment_end(state, segment)
-    # Assuming position is a field in state and it's a StaticArraysCore.SVector
-    position = state.position  # Access the position if it's directly accessible
+    # Extract position and ensure it's in a compatible format
+    position = state.position[1:2]  # Assuming the position is an SVector
 
-    target_position = segment.lane_boundaries[end].pt_b  # Target position from the segment
-    distance_to_target = norm(position[1:2] - target_position)  # Calculate the 2D distance
+    # Determine the target endpoint for the segment
+    target_position = segment.lane_boundaries[end].pt_b
+    distance_to_target = norm(position - target_position)  # Euclidean distance in 2D
 
-    tolerance = 1.0  # Define a tolerance within which we consider the segment end reached
-    return distance_to_target < tolerance
+    # Define a tolerance within which we consider the segment end reached
+    tolerance = 10.0  # Adjust based on your application's specific scale and needs
+
+    # Log detailed information to help with debugging
+    @info "Checking if segment end is reached" current_position=position target_position=target_position distance_to_target=distance_to_target
+
+    # Check if within tolerance
+    ans = distance_to_target < tolerance
+    @info "Segment end status:" ans
+
+    return ans
 end
+
 
 # function is_straight_segment(segment::VehicleSim.RoadSegment)
 #     # Check if all curvatures in the segment are negligible
@@ -549,43 +560,58 @@ function update_pid(controller::PIDController, error::Float64, dt::Float64)
 end
 
 # Initialize the PID controllers for steering and velocity
-steering_pid = PIDController(0.01, 0.01, 0.05, 0.0, 0.0)  # Tune these parameters
+steering_pid = PIDController(0.01, 0.0, 0.0, 0.0, 0.0)  # Tune these parameters
 velocity_pid = PIDController(1.2, 0.01, 0.05, 0.0, 0.0)  # Tune these parameters
+acceptable_deviation_threshold = 0.75
 
 function log_debug_info(segment, state, lookahead_point, steering_angle, velocity, yaw)
-    @info "Debug Info:" begin
-        @info "Segment ID: $(segment.id)"
-        @info "Current Position: $(state.position)"
-        @info "Velocity: $(state.velocity)"
-        @info "Yaw: $yaw"
-        @info "Lookahead Point: $lookahead_point"
-        @info "Steering Angle: $steering_angle"
-        @info "Velocity Command: $velocity"
-    end
+    @info "Segment ID: $(segment.id)"
+    @info "Current Position: $(state.position)"
+    @info "Velocity: $(state.velocity)"
+    @info "Yaw: $yaw"
+    @info "Lookahead Point: $lookahead_point"
+    @info "Steering Angle: $steering_angle"
+    @info "Velocity Command: $velocity"
 end
 
 function pure_pursuit_navigate(segment, localization_state_channel, state, socket, yaw)
-
+    sleep(0.05)
     if isready(localization_state_channel)
         state = fetch(localization_state_channel)
         yaw = extract_yaw_from_quaternion(state.orientation)
     end
 
+    # Calculate lookahead distance and the lookahead point
     lookahead_distance = dynamic_lookahead(state.velocity, segment.lane_boundaries[1].curvature)
     lookahead_point = compute_lookahead_point(segment, state.position, lookahead_distance)
+    
+    # Calculate initial steering angle based on the lookahead point
     steering_angle = calculate_steering(state, lookahead_point, yaw, segment.lane_boundaries[1].curvature)
-    dt = 0.1  # simulation time step
-    velocity = adjust_velocity(segment, state.velocity, dt)
-
-    send_commands(steering_angle, velocity, socket)
-    if !within_lane_boundaries(state.position, segment.lane_boundaries)
-        @info "wrong place"
-        correction = correct_course(state, segment, steering_pid)
+    
+    # Correct the steering to keep within lane boundaries
+    correction, within_boundaries = check_and_correct_course(state.position, segment.lane_boundaries, steering_angle)
+    if !within_boundaries
         steering_angle += correction
-        send_commands(steering_angle, velocity, socket)
+        @info "Adjusting steering to remain within lane boundaries", correction
     end
-    log_debug_info(segment, state, lookahead_point, steering_angle, velocity, yaw)  # Assuming this function is defined to log all relevant information
+
+    # Calculate velocity and send command to the vehicle
+    dt = 0.1  # Simulation time step
+    velocity = adjust_velocity(segment, state.velocity, dt)
+    send_commands(steering_angle, velocity, socket)
+
+    log_debug_info(segment, state, lookahead_point, steering_angle, velocity, yaw)
     return is_at_segment_end(state, segment)
+end
+
+function check_and_correct_course(position, lane_boundaries, current_steering_angle)
+    deviation = calculate_deviation_from_center(position, calculate_lane_center(lane_boundaries))
+    if abs(deviation) > acceptable_deviation_threshold
+        correction = update_pid(steering_pid, deviation, 0.1)  # Assuming dt=0.1s
+        return correction, false
+    else
+        return 0.0, true
+    end
 end
 
 function dynamic_lookahead(velocity::SVector{3, Float64}, curvature::Float64)
@@ -623,7 +649,7 @@ function compute_lookahead_point(current_segment, current_position::SVector{3, F
 end
 
 function adjust_velocity(segment, current_velocity, dt)
-    local min_required_velocity = 1.0  # Set a minimum required velocity
+    local min_required_velocity = 2.0  # Set a minimum required velocity
     local acceleration_rate = 0.5  # Increase acceleration rate
     desired_velocity = segment.speed_limit
     velocity_error = desired_velocity - norm(current_velocity[1:2])
@@ -657,17 +683,49 @@ function within_lane_boundaries(position, lane_boundaries)
 end
 
 function correct_course(state, segment, pid_controller)
-    num_boundaries = length(segment.lane_boundaries) ÷ 2
-    centerline_start = (segment.lane_boundaries[1].pt_a + segment.lane_boundaries[num_boundaries].pt_a) / 2
-    centerline_end = (segment.lane_boundaries[1].pt_b + segment.lane_boundaries[num_boundaries].pt_b) / 2
-    centerline_vector = centerline_end - centerline_start
-    perpendicular = SVector(-centerline_vector[2], centerline_vector[1])
-    position_projection = dot((state.position[1:2] - centerline_start), perpendicular)
-
-    # Adjust the correction angle based on feedback and gradually apply it
+    # Calculate correction
     desired_correction = update_pid(pid_controller, position_projection, 0.1)  # Assuming dt=0.1s
-    gradual_correction = clamp(desired_correction, -0.05, 0.05)  # Limit the correction to avoid abrupt changes
+    corrected_steering = apply_steering_limit(desired_correction)
+    @info "PID correction: $desired_correction, limited to: $corrected_steering"
+    return corrected_steering
+end
 
-    @info "Applying correction: $gradual_correction"
-    return gradual_correction
+
+function check_lane_position_and_correct(state, lane_boundaries, pid_controller)
+    # Calculate closest distance to the lane boundaries
+    lane_center = calculate_lane_center(lane_boundaries)
+    deviation = calculate_deviation_from_center(state.position, lane_center)
+
+    # Determine if a correction is necessary
+    if abs(deviation) > acceptable_deviation_threshold
+        correction = update_pid(pid_controller, deviation, 0.1)  # Adjust dt as needed
+        apply_steering_correction(state, correction)
+    end
+
+    @info "Checked lane position" deviation = deviation
+end
+
+function calculate_lane_center(lane_boundaries)
+    num_points = length(lane_boundaries)
+    center_points = [(lane_boundaries[i].pt_a + lane_boundaries[i].pt_b) / 2 for i in 1:num_points]
+    return mean(center_points)
+end
+
+function calculate_deviation_from_center(position, lane_center)
+    # Simple Euclidean distance for this example, consider more complex geometric calculations as needed
+    return norm(position[1:2] - lane_center[1:2])
+end
+
+function apply_steering_correction(state, correction)
+    # Clamp correction to avoid excessive steering
+    correction = clamp(correction, -max_steering_angle, max_steering_angle)
+    new_steering_angle = state.steering_angle + correction
+    state.steering_angle = new_steering_angle
+
+    @info "Applied steering correction" correction = correction, new_angle = new_steering_angle
+end
+
+function apply_steering_limit(steering_angle)
+    max_steering_angle = π / 4  # Limit to 45 degrees (about 0.785 radians)
+    return clamp(steering_angle, -max_steering_angle, max_steering_angle)
 end

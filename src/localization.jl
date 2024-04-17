@@ -36,12 +36,18 @@ function J_Tbody(x)
 end
 
 function f_ackermann(x, Δt)
-    # Assuming constant velocity model for simplification
     θ = x[3]
     v = x[4]
-    new_x = x[1] + v * cos(θ) * Δt
-    new_y = x[2] + v * sin(θ) * Δt
-    return [new_x, new_y, θ, v]
+    ω = x[11]  # Assuming ωx represents angular velocity about the vertical axis
+    if ω == 0
+        new_x = x[1] + v * cos(θ) * Δt
+        new_y = x[2] + v * sin(θ) * Δt
+    else
+        new_x = x[1] + (v/ω) * (sin(θ + ω*Δt) - sin(θ))
+        new_y = x[2] + (v/ω) * (-cos(θ + ω*Δt) + cos(θ))
+    end
+    new_θ = θ + ω * Δt
+    return [new_x, new_y, new_θ, v]
 end
 
 function extract_yaw_from_quaternion(q)
