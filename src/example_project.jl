@@ -409,6 +409,39 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
     errormonitor(@async localize(gt_channel, localization_state_channel))
     # @async localize(gps_channel, imu_channel, localization_state_channel)
     #@async test_localization(gt_channel, localization_state_channel)
-    #@async perception(cam_channel, localization_state_channel, perception_state_channel)
+    # errormonitor(@async perception(cam_channel, localization_state_channel, perception_state_channel))
     errormonitor(@async decision_making(localization_state_channel, perception_state_channel, map_segments, socket, targets, control_state))
+
+    if isready(localization_state_channel) && isready(perception_state_channel)
+        @info "Both channels ready."
+        # Existing code to process data
+    else
+        if !isready(localization_state_channel)
+            @info "Localization channel not ready."
+        end
+        if isready(perception_state_channel)
+            latest_perception_state = take!(perception_state_channel)
+            @info "Perception data processed."
+        else
+            @info "Perception data not ready."
+        end
+    end
+
+    @info "Localization Channel Full: ", is_channel_full(localization_state_channel)
+    @info "Perception Channel Full: ", is_channel_full(perception_state_channel)
+end
+
+function is_channel_full(channel)
+    return length(channel.data) == channel.sz_max
+end
+
+function try_fetch_with_timeout(channel, timeout)
+    t_start = time()
+    while time() - t_start < timeout
+        if isready(channel)
+            return take!(channel)
+        end
+        sleep(0.01)
+    end
+    return nothing  # Timeout response
 end
