@@ -2,7 +2,7 @@
 
 julia_version = "1.10.2"
 manifest_format = "2.0"
-project_hash = "32ce9052261c08890531fc2ea731b535fa03a0db"
+project_hash = "dbf64db1b6ed53b7d0fa5480e457dd2b088da8ae"
 
 [[deps.Adapt]]
 deps = ["LinearAlgebra", "Requires"]

@@ -10,6 +10,7 @@ using RigidBodyDynamics
 using Rotations
 using PolygonInbounds
 using MeshCat
+using Statistics
 
 # Define ControlState here
 mutable struct ControlState
