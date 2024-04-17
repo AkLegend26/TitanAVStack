@@ -505,6 +505,7 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
     errormonitor(@async localize(gt_channel, localization_state_channel))
     #@async localize(gps_channel, imu_channel, localization_state_channel)
     #@async test_localization(gt_channel, localization_state_channel)
-    #@async perception(cam_channel, localization_state_channel, perception_state_channel)
+    @async perception(cam_channel, localization_state_channel, perception_state_channel)
+    # sleep(0.1)
     errormonitor(@async decision_making(localization_state_channel, map_segments, socket, targets))
 end
