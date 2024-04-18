@@ -542,7 +542,7 @@ end
 #     end
 # end
 
-const WHEELBASE_LENGTH = 3.1  # meters, for example
+const WHEELBASE_LENGTH = 1.1  # meters, for example
 
 mutable struct PIDController
     Kp::Float64
@@ -560,9 +560,11 @@ function update_pid(controller::PIDController, error::Float64, dt::Float64)
 end
 
 # Initialize the PID controllers for steering and velocity
-steering_pid = PIDController(0.01, 0.0, 0.0, 0.0, 0.0)  # Tune these parameters
-velocity_pid = PIDController(1.2, 0.01, 0.05, 0.0, 0.0)  # Tune these parameters
+steering_pid = PIDController(0.001, 0.01, 0.01, 0.0, 0.0)  # Tune these parameters
+velocity_pid = PIDController(10.0, 0.1, 0.05, 0.0, 0.0)  # Tune these parameters
 acceptable_deviation_threshold = 0.75
+const SAFETY_MARGIN = 1.0
+const ERROR_MARGIN = 30
 
 function log_debug_info(segment, state, lookahead_point, steering_angle, velocity, yaw)
     @info "Segment ID: $(segment.id)"
@@ -581,27 +583,90 @@ function pure_pursuit_navigate(segment, localization_state_channel, state, socke
         yaw = extract_yaw_from_quaternion(state.orientation)
     end
 
+    @info "Evaluating vehicle position" current_position=state.position
+
+
     # Calculate lookahead distance and the lookahead point
     lookahead_distance = dynamic_lookahead(state.velocity, segment.lane_boundaries[1].curvature)
-    lookahead_point = compute_lookahead_point(segment, state.position, lookahead_distance)
-    
-    # Calculate initial steering angle based on the lookahead point
-    steering_angle = calculate_steering(state, lookahead_point, yaw, segment.lane_boundaries[1].curvature)
-    
-    # Correct the steering to keep within lane boundaries
-    correction, within_boundaries = check_and_correct_course(state.position, segment.lane_boundaries, steering_angle)
-    if !within_boundaries
-        steering_angle += correction
-        @info "Adjusting steering to remain within lane boundaries", correction
+
+    raw_lookahead_point = compute_lookahead_point(segment, state.position, lookahead_distance)
+    if !within_lane_boundaries(raw_lookahead_point, segment.lane_boundaries)
+        lookahead_point = adjust_lookahead_within_boundaries(raw_lookahead_point, segment.lane_boundaries)
+        @info "Adjusted lookahead point to stay within boundaries" lookahead_point
+    else
+        lookahead_point = raw_lookahead_point
+        @info "Lookahead point is within boundaries" lookahead_point
     end
 
-    # Calculate velocity and send command to the vehicle
-    dt = 0.1  # Simulation time step
-    velocity = adjust_velocity(segment, state.velocity, dt)
-    send_commands(steering_angle, velocity, socket)
+    deviation = calculate_deviation_from_center(state.position, calculate_lane_center(segment.lane_boundaries))
+    @info "Checking deviation from lane center" deviation
+    if deviation > ERROR_MARGIN
+        @info "Deviation exceeds safety margin, vehicle too close to boundary, stopping."
+        send_commands(0.0, 0.0, socket)
+        return false
+    else
+        @info "Deviation within acceptable range" deviation
+    end
 
-    log_debug_info(segment, state, lookahead_point, steering_angle, velocity, yaw)
+
+    # Calculate steering angle
+    steering_angle = calculate_steering(state, lookahead_point, yaw, segment.lane_boundaries[1].curvature)
+
+    # Velocity control with PID adjustments
+    dt = 0.1  # Simulation time step
+    desired_velocity = adjust_velocity(segment, state.velocity, dt)
+    velocity_correction = update_pid(velocity_pid, desired_velocity - norm(state.velocity[1:2]), dt)
+    final_velocity = max(0.0, desired_velocity + velocity_correction)
+
+    if is_at_segment_end(state, segment)
+        @info "Segment end reached. Vehicle please stop if this is the last segment in the path."
+        # Don't send a stop command here. Let the decision-making loop handle it.
+        return true
+    end
+    
+    send_commands(steering_angle, final_velocity, socket)
+    log_debug_info(segment, state, lookahead_point, steering_angle, final_velocity, yaw)
+
     return is_at_segment_end(state, segment)
+end
+
+function aligned_with_road(position, yaw, segment)
+    # Check if the current heading aligns with the road's direction
+    road_direction = atan(segment.lane_boundaries[end].pt_b[2] - segment.lane_boundaries[1].pt_a[2],
+                           segment.lane_boundaries[end].pt_b[1] - segment.lane_boundaries[1].pt_a[1])
+    return abs((yaw - road_direction + π) % (2π) - π) < 0.1  # Threshold for alignment
+end
+
+function adjust_lookahead_within_boundaries(point, lane_boundaries)
+    closest_point = point
+    min_distance = Inf
+    for boundary in lane_boundaries
+        projected_point = project_point_onto_line(point, boundary.pt_a, boundary.pt_b)
+        distance = norm(point - projected_point)
+        if distance < min_distance && within_segment(projected_point, boundary.pt_a, boundary.pt_b)
+            min_distance = distance
+            closest_point = projected_point
+            @info "New closest point found within segment boundaries: $closest_point with distance $distance"
+        end
+    end
+    if closest_point == point
+        @info "No adjustment made, original point is used: $point"
+    end
+    return closest_point
+end
+
+function within_lane_boundaries(point, lane_boundaries)
+    inside = false
+    for i in 1:length(lane_boundaries)
+        j = (i % length(lane_boundaries)) + 1
+        if ((lane_boundaries[i].pt_a[2] > point[2]) != (lane_boundaries[j].pt_a[2] > point[2])) &&
+            (point[1] < (lane_boundaries[j].pt_a[1] - lane_boundaries[i].pt_a[1]) * (point[2] - lane_boundaries[i].pt_a[2]) /
+            (lane_boundaries[j].pt_a[2] - lane_boundaries[i].pt_a[2]) + lane_boundaries[i].pt_a[1])
+            inside = !inside
+        end
+    end
+    @info "Point $point boundary check against segments: " * (inside ? "inside" : "outside")
+    return inside
 end
 
 function check_and_correct_course(position, lane_boundaries, current_steering_angle)
@@ -615,7 +680,7 @@ function check_and_correct_course(position, lane_boundaries, current_steering_an
 end
 
 function dynamic_lookahead(velocity::SVector{3, Float64}, curvature::Float64)
-    base_lookahead = 10.0
+    base_lookahead = 1.0
     speed_factor = norm(velocity[1:2]) / 10
     curvature_adjustment = max(1.0, 1 / abs(curvature))
     lookahead_distance = base_lookahead * speed_factor / curvature_adjustment
@@ -660,26 +725,6 @@ function adjust_velocity(segment, current_velocity, dt)
         new_velocity = min_required_velocity  # Ensure a minimum velocity if below threshold
     end
     return min(new_velocity, desired_velocity)
-end
-
-function within_lane_boundaries(position, lane_boundaries)
-    # Assuming the first half of the lane_boundaries array defines the right half of the road.
-    num_boundaries = length(lane_boundaries) ÷ 2
-    points = [b.pt_a for b in lane_boundaries[1:num_boundaries]]  # Use only the right half
-    push!(points, lane_boundaries[num_boundaries].pt_b)  # Add the endpoint of the last boundary
-
-    # Determine if the position is within the polygon defined by these points
-    inside = false
-    j = lastindex(points)
-    for i in 1:length(points)
-        if ((points[i][2] > position[2]) != (points[j][2] > position[2])) &&
-           (position[1] < (points[j][1] - points[i][1]) * (position[2] - points[i][2]) / 
-            (points[j][2] - points[i][2]) + points[i][1])
-            inside = !inside
-        end
-        j = i
-    end
-    return inside
 end
 
 function correct_course(state, segment, pid_controller)
@@ -729,3 +774,70 @@ function apply_steering_limit(steering_angle)
     max_steering_angle = π / 4  # Limit to 45 degrees (about 0.785 radians)
     return clamp(steering_angle, -max_steering_angle, max_steering_angle)
 end
+
+function project_point_onto_line(point, pt_a, pt_b)
+    line_vector = pt_b - pt_a
+    point_vector = point - pt_a
+    line_length_squared = dot(line_vector, line_vector)
+    if line_length_squared == 0
+        @info "Degenerate line segment from $pt_a to $pt_b used for projection."
+        return pt_a
+    end
+    t = clamp(dot(point_vector, line_vector) / line_length_squared, 0.0, 1.0)
+    projected_point = pt_a + t * line_vector
+    @info "Point $point projected onto line from $pt_a to $pt_b as $projected_point"
+    return projected_point
+end
+
+"""
+    within_segment(point, pt_a, pt_b)
+
+Check if a point is within the segment defined by pt_a and pt_b.
+"""
+function within_segment(point, pt_a, pt_b)
+    # Check if point is between pt_a and pt_b inclusively
+    if norm(pt_a - pt_b) == 0
+        return point == pt_a
+    end
+    # Cross product must be zero if point is collinear, and check dot products for bounds
+    collinear = (pt_b[2] - pt_a[2]) * (point[1] - pt_a[1]) == (point[2] - pt_a[2]) * (pt_b[1] - pt_a[1])
+    within_bounds = minimum([pt_a[1], pt_b[1]]) <= point[1] <= maximum([pt_a[1], pt_b[1]]) &&
+                    minimum([pt_a[2], pt_b[2]]) <= point[2] <= maximum([pt_a[2], pt_b[2]])
+    return collinear && within_bounds
+end
+
+# function within_lane_boundaries(point, lane_boundaries)
+#     count = 0
+#     n = length(lane_boundaries)
+#     for i in 1:n
+#         j = i % n + 1
+#         if ((lane_boundaries[i].pt_a[2] > point[2]) != (lane_boundaries[j].pt_a[2] > point[2])) &&
+#             (point[1] < (lane_boundaries[j].pt_a[1] - lane_boundaries[i].pt_a[1]) *
+#             (point[2] - lane_boundaries[i].pt_a[2]) / (lane_boundaries[j].pt_a[2] - lane_boundaries[i].pt_a[2]) +
+#             lane_boundaries[i].pt_a[1])
+#             count += 1
+#         end
+#     end
+#     return count % 2 == 1
+# end
+
+
+# function within_lane_boundaries(position, lane_boundaries)
+#     # Assuming the first half of the lane_boundaries array defines the right half of the road.
+#     num_boundaries = length(lane_boundaries) ÷ 2
+#     points = [b.pt_a for b in lane_boundaries[1:num_boundaries]]  # Use only the right half
+#     push!(points, lane_boundaries[num_boundaries].pt_b)  # Add the endpoint of the last boundary
+
+#     # Determine if the position is within the polygon defined by these points
+#     inside = false
+#     j = lastindex(points)
+#     for i in 1:length(points)
+#         if ((points[i][2] > position[2]) != (points[j][2] > position[2])) &&
+#            (position[1] < (points[j][1] - points[i][1]) * (position[2] - points[i][2]) / 
+#             (points[j][2] - points[i][2]) + points[i][1])
+#             inside = !inside
+#         end
+#         j = i
+#     end
+#     return inside
+# end

@@ -15,10 +15,11 @@ end
 function localize(gps_channel::Channel{GPSMeasurement}, imu_channel::Channel{IMUMeasurement}, localization_state_channel::Channel{MyLocalizationType})
     @info "Localization process started."
     ekf = ekf_initialize()  # Initialize the EKF\
+    @info "YESSSS"
     while true
         try
             if isready(gps_channel)
-                gps_measurement = take!(gps_channel)
+                gps_measurement = fetch(gps_channel)
                 gps_data = [gps_measurement.lat, gps_measurement.long, gps_measurement.heading]
                 ekf_update!(ekf, gps_data, h_gps, Jac_h_gps, ekf.measurement_noise_gps)
                 #@info "Processed GPS data: ", gps_data
@@ -27,7 +28,7 @@ function localize(gps_channel::Channel{GPSMeasurement}, imu_channel::Channel{IMU
             end
 
             if isready(imu_channel)
-                imu_measurement = take!(imu_channel)
+                imu_measurement = fetch(imu_channel)
                 imu_data = [imu_measurement.linear_vel..., imu_measurement.angular_vel...]
                 ekf_update!(ekf, imu_data, h_imu, jac_h_imu, ekf.measurement_noise_imu)
                 #@info "Processed IMU data: ", imu_data
@@ -46,8 +47,21 @@ function localize(gps_channel::Channel{GPSMeasurement}, imu_channel::Channel{IMU
                     take!(localization_state_channel)  # Clear the channel if full
                 end
                 put!(localization_state_channel, localized_state)
-                @info "Published updated localization state."
+                #@info "Published updated localization state."
             end
+
+            if length(gps_channel.data) == 1
+                while length(gps_channel.data) != 0
+                    take!(gps_channel)
+                end
+            end
+            if length(imu_channel.data) == 1
+                while length(imu_channel.data) != 0
+                    take!(imu_channel)
+                end
+            end
+
+            sleep(0.00001)  # Manage loop timing
         catch e
             @error "Error in localization process" exception=(e, catch_backtrace())
             continue  # Optionally break or continue based on error severity
@@ -138,13 +152,14 @@ function decision_making(localization_state_channel, map_segments, socket, targe
                 if current_segment_id == -1
                     @error "No segment found for position"
                     latest_localization_state.position
-                    sleep(0.001)
+                    sleep(1)
                     continue
                 end
                 @info "Current segment found"
                 @info current_segment_id
                 segment_id = current_segment_id
                 path = shortest_path(current_segment_id, target_road_segment_id, map_segments)
+                @info path
                 if isempty(path)
                     @warn "No path found"
                     current_segment_id
@@ -161,11 +176,17 @@ function decision_making(localization_state_channel, map_segments, socket, targe
                     segment = map_segments[segment_id]
                     @info "Navigating segment" segment_id=segment_id
                     while true
-                        result = pure_pursuit_navigate(segment, localization_state_channel,latest_localization_state, socket, yaw)
+                        result = pure_pursuit_navigate(segment, localization_state_channel, latest_localization_state, socket, yaw)
                         if result === true
-                            break  # Successfully navigated the segment
+                            # Check if we have reached the end of the path
+                            if segment_id == last(path)
+                                @info "End of path reached. Sending stop command."
+                                send_commands(0.0, 0.0, socket)
+                                return 
+                            end
+                            break  
                         elseif result === false
-                            sleep(0.001)  # Wait before trying to navigate the segment again
+                            sleep(0.001)  
                         else
                             @error "Unexpected result from pure_pursuit_navigate" result
                             break
@@ -173,7 +194,7 @@ function decision_making(localization_state_channel, map_segments, socket, targe
                     end
                 end
             else
-                sleep(0.001)
+                sleep(0.01)
             end
         catch e
             @error "An error occurred during the decision making process" exception=(e, catch_backtrace())
@@ -285,6 +306,7 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
     errormonitor(@async while true
         # This while loop reads to the end of the socket stream (makes sure you
         # are looking at the latest messages)
+        sleep(0.001)
         local measurement_msg
         received = false
         while true
@@ -299,9 +321,6 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
         !received && continue
         target_map_segment = measurement_msg.target_segment
         ego_vehicle_id = measurement_msg.vehicle_id
-
-        @info "heading into measurements"
-
         for meas in measurement_msg.measurements
             if meas isa GPSMeasurement
                 !isfull(gps_channel) && put!(gps_channel, meas)
@@ -317,7 +336,6 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
                 @info "Received data of type $(typeof(meas))"
             end
         end
-        
     end)
 
     targets = 51
@@ -325,5 +343,6 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
     errormonitor(@async localize(gps_channel, imu_channel, localization_state_channel))
     #@async test_localization(gt_channel, localization_state_channel)
     #@async perception(cam_channel, localization_state_channel, perception_state_channel)
+    sleep(0.001)
     errormonitor(@async decision_making(localization_state_channel, map_segments, socket, targets))
 end
