@@ -9,6 +9,7 @@ function find_current_segment(position, map_segments, yaw)
         local_closest_dist = Inf
 
         for (id, segment) in segments
+            @info "checking each segment"
             within, distance = check_segment(position, segment)
             if within && distance < local_closest_dist
                 local_closest_dist = distance
@@ -19,6 +20,7 @@ function find_current_segment(position, map_segments, yaw)
         return local_best_id, local_closest_dist
     end
 
+    @info "checking segments"
     best_segment_id, closest_distance = check_segments(map_segments, position)
 
     # If no suitable segment is found, check the children of the segments
@@ -55,7 +57,8 @@ function find_current_segment(position, map_segments, yaw)
         @info "Curvature Direction: $curvature_direction"
         @info "Vehicle Alignment: $vehicle_alignment"
 
-        return [best_segment_id, segment_type, curvature_direction, vehicle_alignment]
+        # return [best_segment_id, segment_type, curvature_direction, vehicle_alignment]
+        return best_segment_id
     else
         #@error "No current segment found for position: $position"
         return -1
@@ -181,14 +184,34 @@ function check_straight_segment(position, boundaries)
     return within, distance
 end
 
+# function check_curved_segment(position, segment)
+
+
+#     boundary = segment.lane_boundaries[1]
+#     center = calculate_curve_center(boundary)
+#     radius = calculate_curve_radius(boundary)
+#     pt_a = boundary.pt_a
+#     pt_b = boundary.pt_b
+#     angle = atan(position[2] - center[2], position[1] - center[1])
+#     distance = norm(position - center)
+
+#     within_angle = is_within_angle(pt_a, pt_b, center, angle)
+#     within_radius = radius * 0.9 <= distance <= radius * 1.1
+
+#     return within_angle && within_radius, distance - radius
+# end
+
 function check_curved_segment(position, segment)
+    # Extract the x and y components from the 3D position vector.
+    pos_2d = position[1:2]
+
     boundary = segment.lane_boundaries[1]
     center = calculate_curve_center(boundary)
     radius = calculate_curve_radius(boundary)
     pt_a = boundary.pt_a
     pt_b = boundary.pt_b
-    angle = atan(position[2] - center[2], position[1] - center[1])
-    distance = norm(position - center)
+    angle = atan(pos_2d[2] - center[2], pos_2d[1] - center[1])
+    distance = norm(pos_2d - center)
 
     within_angle = is_within_angle(pt_a, pt_b, center, angle)
     within_radius = radius * 0.9 <= distance <= radius * 1.1
@@ -681,8 +704,8 @@ function log_debug_info(segment, state, lookahead_point, steering_angle, velocit
     @info "Velocity Command: $velocity"
 end
 
-function pure_pursuit_navigate(segment, localization_state_channel, state, socket, yaw)
-    sleep(0.05)
+function pure_pursuit_navigate(segment, localization_state_channel, state, socket, yaw, map_segments)
+    # sleep(0.05)
     if isready(localization_state_channel)
         state = fetch(localization_state_channel)
         yaw = extract_yaw_from_quaternion(state.orientation)
@@ -690,6 +713,14 @@ function pure_pursuit_navigate(segment, localization_state_channel, state, socke
 
     @info "Evaluating vehicle position" current_position=state.position
 
+    # Find the current segment based on the vehicle's position
+    current_segment_id = find_current_segment(state.position, map_segments, yaw)
+
+    if current_segment_id != segment.id
+        # The vehicle has transitioned to a new segment
+        @info "Transitioned to new segment: $current_segment_id"
+        segment = map_segments[current_segment_id]
+    end
 
     # Calculate lookahead distance and the lookahead point
     lookahead_distance = dynamic_lookahead(state.velocity, segment.lane_boundaries[1].curvature, segment, yaw)

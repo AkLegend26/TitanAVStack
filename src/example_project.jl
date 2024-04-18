@@ -146,11 +146,13 @@ function decision_making(localization_state_channel, map_segments, socket, targe
             if isready(localization_state_channel)
                 latest_localization_state = fetch(localization_state_channel)
                 @info "Finding current segment..."
-                latest_localization_state.position
+                latest_localization_state.position = latest_localization_state.position[1:2]  # Only use the first two components
+
                 yaw = extract_yaw_from_quaternion(latest_localization_state.orientation)
 
-                current_segment_info = find_current_segment(latest_localization_state.position[1:2], map_segments, yaw)
-                current_segment_id = current_segment_info[1]
+                # current_segment_info = find_current_segment(latest_localization_state.position[1:2], map_segments, yaw)
+                # current_segment_id = current_segment_info[1]
+                current_segment_id = find_current_segment(latest_localization_state.position, map_segments, yaw)
                 # segment_type = current_segment_info[2]
                 # curvature_direction = current_segment_info[3]
                 # vehicle_alignment = current_segment_info[4]
@@ -183,7 +185,7 @@ function decision_making(localization_state_channel, map_segments, socket, targe
                     segment = map_segments[segment_id]
                     @info "Navigating segment" segment_id=segment_id
                     while true
-                        result = pure_pursuit_navigate(segment, localization_state_channel, latest_localization_state, socket, yaw)
+                        result = pure_pursuit_navigate(segment, localization_state_channel, latest_localization_state, socket, yaw, map_segments)
                         if result === true
                             # Check if we have reached the end of the path
                             if segment_id == last(path)
