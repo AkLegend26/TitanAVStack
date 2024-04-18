@@ -16,77 +16,77 @@ function get_c()
     c
 end
 
-function keyboard_client(host::IPAddr=IPv4(0), port=4444; v_step = 1.0, s_step = π/10)
-    socket = Sockets.connect(host, port)
-    (peer_host, peer_port) = getpeername(socket)
-    msg = deserialize(socket) # Visualization info
-    @info msg
+# function keyboard_client(host::IPAddr=IPv4(0), port=4444; v_step = 1.0, s_step = π/10)
+#     socket = Sockets.connect(host, port)
+#     (peer_host, peer_port) = getpeername(socket)
+#     msg = deserialize(socket) # Visualization info
+#     @info msg
 
-    @async while isopen(socket)
-        sleep(0.001)
-        state_msg = deserialize(socket)
-        measurements = state_msg.measurements
-        num_cam = 0
-        num_imu = 0
-        num_gps = 0
-        num_gt = 0
-        for meas in measurements
-            if meas isa GroundTruthMeasurement
-                num_gt += 1
-            elseif meas isa CameraMeasurement
-                num_cam += 1
-            elseif meas isa IMUMeasurement
-                num_imu += 1
-            elseif meas isa GPSMeasurement
-                num_gps += 1
-            end
-        end
-        @info "Measurements received: $num_gt gt; $num_cam cam; $num_imu imu; $num_gps gps"
-    end
+#     @async while isopen(socket)
+#         sleep(0.001)
+#         state_msg = deserialize(socket)
+#         measurements = state_msg.measurements
+#         num_cam = 0
+#         num_imu = 0
+#         num_gps = 0
+#         num_gt = 0
+#         for meas in measurements
+#             if meas isa GroundTruthMeasurement
+#                 num_gt += 1
+#             elseif meas isa CameraMeasurement
+#                 num_cam += 1
+#             elseif meas isa IMUMeasurement
+#                 num_imu += 1
+#             elseif meas isa GPSMeasurement
+#                 num_gps += 1
+#             end
+#         end
+#         @info "Measurements received: $num_gt gt; $num_cam cam; $num_imu imu; $num_gps gps"
+#     end
     
-    target_velocity = 0.0
-    steering_angle = 0.0
-    controlled = true
+#     target_velocity = 0.0
+#     steering_angle = 0.0
+#     controlled = true
     
-    client_info_string = 
-        "********************
-      Keyboard Control (manual mode)
-      ********************
-        -Press 'q' at any time to terminate vehicle.
-        -Press 'i' to increase vehicle speed.
-        -Press 'k' to decrease vehicle speed.
-        -Press 'j' to increase steering angle (turn left).
-        -Press 'l' to decrease steering angle (turn right)."
-    @info client_info_string
-    while controlled && isopen(socket)
-        key = get_c()
-        if key == 'q'
-            # terminate vehicle
-            controlled = false
-            target_velocity = 0.0
-            steering_angle = 0.0
-            @info "Terminating Keyboard Client."
-        elseif key == 'i'
-            # increase target velocity
-            target_velocity += v_step
-            @info "Target velocity: $target_velocity"
-        elseif key == 'k'
-            # decrease forward force
-            target_velocity -= v_step
-            @info "Target velocity: $target_velocity"
-        elseif key == 'j'
-            # increase steering angle
-            steering_angle += s_step
-            @info "Target steering angle: $steering_angle"
-        elseif key == 'l'
-            # decrease steering angle
-            steering_angle -= s_step
-            @info "Target steering angle: $steering_angle"
-        end
-        cmd = (steering_angle, target_velocity, controlled)
-        serialize(socket, cmd)
-    end
-end
+#     client_info_string = 
+#         "********************
+#       Keyboard Control (manual mode)
+#       ********************
+#         -Press 'q' at any time to terminate vehicle.
+#         -Press 'i' to increase vehicle speed.
+#         -Press 'k' to decrease vehicle speed.
+#         -Press 'j' to increase steering angle (turn left).
+#         -Press 'l' to decrease steering angle (turn right)."
+#     @info client_info_string
+#     while controlled && isopen(socket)
+#         key = get_c()
+#         if key == 'q'
+#             # terminate vehicle
+#             controlled = false
+#             target_velocity = 0.0
+#             steering_angle = 0.0
+#             @info "Terminating Keyboard Client."
+#         elseif key == 'i'
+#             # increase target velocity
+#             target_velocity += v_step
+#             @info "Target velocity: $target_velocity"
+#         elseif key == 'k'
+#             # decrease forward force
+#             target_velocity -= v_step
+#             @info "Target velocity: $target_velocity"
+#         elseif key == 'j'
+#             # increase steering angle
+#             steering_angle += s_step
+#             @info "Target steering angle: $steering_angle"
+#         elseif key == 'l'
+#             # decrease steering angle
+#             steering_angle -= s_step
+#             @info "Target steering angle: $steering_angle"
+#         end
+#         cmd = (steering_angle, target_velocity, controlled)
+#         serialize(socket, cmd)
+#     end
+# end
 
 function example_client(host::IPAddr=IPv4(0), port=4444)
     socket = Sockets.connect(host, port)

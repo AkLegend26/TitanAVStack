@@ -54,6 +54,24 @@ function extract_yaw_from_quaternion(q)
     atan(2(q[1]*q[4]+q[2]*q[3]), 1-2*(q[3]^2+q[4]^2))
 end
 
+function quaternion_multiply(q1, q2)
+    a, b, c, d = q1
+    e, f, g, h = q2
+
+    return [
+        a*e - b*f - c*g - d*h,
+        a*f + b*e + c*h - d*g,
+        a*g - b*h + c*e + d*f,
+        a*h + b*g - c*f + d*e
+    ]
+end
+
+function quaternion_derivative(q, omega)
+    omega_quat = [0; omega]  # Convert angular velocity vector to quaternion
+    return 0.5 * quaternion_multiply(q, omega_quat)
+end
+
+
 function Rot_from_quat(q)
     qw = q[1]
     qx = q[2]
@@ -162,6 +180,14 @@ function jac_h_imu(state::Vector{Float64})
     return J
 end
 
+function normalize_quaternion(q)
+    norm = sqrt(dot(q, q))
+    if norm > 0
+        return q / norm
+    else
+        return q  # Handle zero norm case more robustly if possible
+    end
+end
 
 function ekf_predict(ekf::ExtendedKalmanFilter, Δt::Float64)
     new_state = f_ackermann(ekf.state, Δt)
@@ -170,25 +196,46 @@ function ekf_predict(ekf::ExtendedKalmanFilter, Δt::Float64)
     return ExtendedKalmanFilter(new_state, new_covariance, ekf.process_noise, ekf.measurement_noise_gps, ekf.measurement_noise_imu)
 end
 
+function predict_quaternion(q, omega, dt)
+    # Compute the quaternion derivative
+    q_dot = quaternion_derivative(q, omega)
+    # Integrate to get the new quaternion
+    q_new = q + q_dot * dt
+    # Normalize the quaternion to avoid drift
+    return normalize_quaternion(q_new)
+end
+
+
 function ekf_update!(ekf::ExtendedKalmanFilter, measurement, measurement_function, jac_hx, measurement_noise)
     z_pred = measurement_function(ekf.state)
     z = measurement
     H = jac_hx(ekf.state)
     Y = z - z_pred
-    S = H * ekf.covariance * H' + measurement_noise
+    S = H * ekf.covariance * H' + measurement_noise + 1e-5 * I
+    Δt = 0.1
     K = ekf.covariance * H' / S
     ekf.state += K * Y
+    ekf.state[4:7] = predict_quaternion(ekf.state[4:7], ekf.state[11:13], Δt)  # Normalize quaternion part of the state
+
     ekf.covariance = (I - K * H) * ekf.covariance
 end
 
 function ekf_initialize()
-    state = zeros(13)  # Expanded state: [x, y, θ, vx, vy, vz, ωx, ωy, ωz, quaternion...]
+    # Expanded state vector, including a properly initialized quaternion
+    state = zeros(13)  # Adjust the size if necessary to fit all your state variables
+    state[4:7] = [1.0, 0.0, 0.0, 0.0]  # Initialize the quaternion part to identity quaternion
+
     covariance = diagm(0 => 0.1 * ones(13))
+    # Increase initial uncertainty for the quaternion if needed
+    covariance[4:7, 4:7] *= 1  # increase the initial uncertainty of the quaternion
+
     process_noise = diagm(0 => 0.1 * ones(13))
-    measurement_noise_gps = diagm(0 => [0.1, 0.1, 0.1])  # Adjusted for GPS data structure
-    measurement_noise_imu = diagm(0 => 0.1 * ones(6))  # IMU measures 6 states
+    measurement_noise_gps = diagm(0 => [0.1, 0.1, 0.1])  # You might need to adjust this based on your measurement structure
+    measurement_noise_imu = diagm(0 => 0.1 * ones(6))  # Adjust as necessary for the actual number of IMU measurements
+
     ExtendedKalmanFilter(state, covariance, process_noise, measurement_noise_gps, measurement_noise_imu)
 end
+
 
 function run_localization_loop(ekf)
     Δt = 0.1  # time step
