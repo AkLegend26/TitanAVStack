@@ -431,8 +431,6 @@ end
 
 
 
-
-
 # function point_within_curve(point, center, start_angle, end_angle, radius, width)
 #     @info "Checking if point is within curved boundary"
 #     rel_point = point - center
