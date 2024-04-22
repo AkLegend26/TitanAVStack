@@ -146,13 +146,13 @@ function decision_making(localization_state_channel, map_segments, socket, targe
             if isready(localization_state_channel)
                 latest_localization_state = fetch(localization_state_channel)
                 @info "Finding current segment..."
-                latest_localization_state.position = latest_localization_state.position[1:2]  # Only use the first two components
+                latest_localization_state_position = latest_localization_state.position[1:2]  # Only use the first two components
 
                 yaw = extract_yaw_from_quaternion(latest_localization_state.orientation)
-
+                @info "got here"
                 # current_segment_info = find_current_segment(latest_localization_state.position[1:2], map_segments, yaw)
                 # current_segment_id = current_segment_info[1]
-                current_segment_id = find_current_segment(latest_localization_state.position, map_segments, yaw)
+                current_segment_id = find_current_segment(latest_localization_state_position, map_segments, yaw)
                 # segment_type = current_segment_info[2]
                 # curvature_direction = current_segment_info[3]
                 # vehicle_alignment = current_segment_info[4]

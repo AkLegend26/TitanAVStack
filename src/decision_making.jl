@@ -9,7 +9,7 @@ function find_current_segment(position, map_segments, yaw)
         local_closest_dist = Inf
 
         for (id, segment) in segments
-            @info "checking each segment"
+            # @info "checking each segment"
             within, distance = check_segment(position, segment)
             if within && distance < local_closest_dist
                 local_closest_dist = distance
@@ -348,16 +348,16 @@ function calculate_segment_center(segment)
     return (centroid_x, centroid_y)
 end
 
-function adjust_position_based_on_yaw(position, yaw)
-    if length(position) < 2
-        @error "Invalid position length"
-        return position
-    end
-    pos = SVector{2, Float64}(position[1], position[2])
-    adjusted_position = pos + SVector{2, Float64}(7*cos(yaw), 7*sin(yaw))
-    #@info "Adjusted position based on yaw" original_position=pos adjusted_position=adjusted_position yaw=yaw
-    return adjusted_position
-end
+# function adjust_position_based_on_yaw(position, yaw)
+#     if length(position) < 2
+#         @error "Invalid position length"
+#         return position
+#     end
+#     pos = SVector{2, Float64}(position[1], position[2])
+#     adjusted_position = pos + SVector{2, Float64}(7*cos(yaw), 7*sin(yaw))
+#     #@info "Adjusted position based on yaw" original_position=pos adjusted_position=adjusted_position yaw=yaw
+#     return adjusted_position
+# end
 
 # function calculate_curve_angles(center, pt_a, pt_b)
 #     vec_a = pt_a - center
