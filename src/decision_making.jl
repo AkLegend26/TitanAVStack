@@ -232,157 +232,6 @@ function adjust_position_based_on_yaw(position, yaw)
     return adjusted_position
 end
 
-# function calculate_curve_angles(center, pt_a, pt_b)
-#     vec_a = pt_a - center
-#     vec_b = pt_b - center
-#     angle_a = atan(vec_a[2], vec_a[1])
-#     angle_b = atan(vec_b[2], vec_b[1])
-    
-#     # Ensure angles are ordered correctly
-#     if angle_a > angle_b
-#         return angle_b, angle_a
-#     else
-#         return angle_a, angle_b
-#     end
-# end
-
-# function navigate_segment(segment, state, yaw, socket)
-#     if !isopen(socket)
-#         @warn "Socket is closed, attempting to reconnect..."
-#         return
-#     end
-
-#     try
-#         # Validate the lane boundaries
-#         if length(segment.lane_boundaries) < 2
-#             @error "Invalid road segment: less than 2 lane boundaries."
-#             return
-#         end
-#         if is_straight_segment(segment)
-#             path_angle = calculate_path_angle(segment)  # Use a fixed path angle for straight segments
-#         else
-#             path_angle = calculate_dynamic_path_angle(segment, state.position)  # More complex handling for curved segments
-#         end
-
-#         path_error, cross_track_error = compute_path_and_cte(segment, state.position, yaw, path_angle)
-
-#         steering_angle = calculate_steering_angle(path_error, cross_track_error, state.velocity[1])
-#         max_steering_angle = π / 6  # Example: Clamp to 30 degrees
-#         steering_angle = clamp(steering_angle, -max_steering_angle, max_steering_angle)
-#         velocity = adjust_velocity(segment, cross_track_error)
-
-#         # Clamp the steering angle to a max/min to prevent unrealistic steering
-#         # max_steering_angle = π / 6  # Maximum steering angle, e.g., 30 degrees
-#         # steering_angle = calculate_steering_angle(path_angle, cross_track_error, state.velocity[1])
-#         # steering_angle = clamp(steering_angle, -max_steering_angle, max_steering_angle)
-
-#         @info "Current state position: " state.position
-#         @info "path angle:" path_angle
-#         @info "Yaw: " yaw
-#         @info "Path angle: " path_error
-#         @info "Cross-track error: " cross_track_error
-#         @info "Calculated steering angle: " steering_angle
-#         @info "Calculated velocity: " velocity
-
-#         @info "Navigating segment $(segment.id): Steering angle: $(steering_angle), Velocity: $(velocity)"
-
-#         send_commands(steering_angle, velocity, socket)
-
-
-#         return is_at_segment_end(state, segment)  
-#     catch e
-#         @error "An error occurred while navigating the segment" exception=(e, catch_backtrace())
-#         return false
-#     end
-# end
-
-# function calculate_dynamic_path_angle(segment, position)
-#     # This function would calculate path angles based on segment curvature and vehicle position
-#     # Placeholder for more complex path angle calculations
-#     return atan(segment.lane_boundaries[end].pt_b[2] - segment.lane_boundaries[1].pt_a[2], 
-#                  segment.lane_boundaries[end].pt_b[1] - segment.lane_boundaries[1].pt_a[1])
-# end
-
-
-# function calculate_path_angle(segment)
-#     # Assuming this function now returns a consistent angle based on segment orientation
-#     dir_vector = segment.lane_boundaries[end].pt_b - segment.lane_boundaries[1].pt_a
-#     return atan(dir_vector[2], dir_vector[1])
-# end
-
-# function calculate_steering_angle(path_error, cross_track_error, velocity)
-#     k_path = 0.05  # Further reduce path following gain
-#     k_cte = 0.02   # Further reduce cross-track error gain
-
-#     # Calculate steering adjustment based on reduced gains
-#     steering_adjustment = atan(k_cte * cross_track_error / max(velocity, 0.1))  # Smoothing the response
-#     adjusted_steering = path_error + steering_adjustment
-
-#     # Limit the steering angle to prevent excessive turning
-#     max_steering_angle = π / 18  # Limiting to about 10 degrees
-#     return clamp(adjusted_steering, -max_steering_angle, max_steering_angle)
-# end
-
-# # function adjust_velocity(segment, cross_track_error)
-# #     if any(lane_type -> lane_type == VehicleSim.stop_sign, segment.lane_types)
-# #         # Special handling for stop signs
-# #         return min(1.0, segment.speed_limit * 0.1)  # Example adjustment
-# #     end
-
-# #     curvature_effect = max(0.1, 1 - abs(mean([lb.curvature for lb in segment.lane_boundaries])))
-# #     cte_effect = max(0, 1 - abs(cross_track_error) / 5)
-# #     return segment.speed_limit * curvature_effect * cte_effect
-# # end
-
-# # Helper function to calculate the center of the current lane
-# function calculate_lane_center(lane_boundaries)
-#     # Assuming you're taking an average or a midpoint of some sort
-#     midpoint = (lane_boundaries[1].pt_a + lane_boundaries[end].pt_b) / 2
-#     return SVector{2, Float64}(midpoint[1], midpoint[2])
-# end
-
-# function compute_path_and_cte(segment, position, yaw, path_angle)
-#     # Assuming a simple direct path from the start to end of segment
-#     intended_path_angle = path_angle  # This should be the direction of the segment
-#     path_error = intended_path_angle - yaw
-#     path_error = mod(path_error + π, 2 * π) - π  # Normalize the error to be within -π to π
-
-#     # Simple cross-track error based on perpendicular distance to the path
-#     dx = cos(intended_path_angle) * (position[2] - segment.lane_boundaries[1].pt_a[2]) - sin(intended_path_angle) * (position[1] - segment.lane_boundaries[1].pt_a[1])
-#     cross_track_error = abs(dx)
-
-#     @info "Intended Path Angle: $intended_path_angle"
-#     @info "Path Error: $path_error"
-#     @info "Cross-Track Error: $cross_track_error"
-
-#     return path_error, cross_track_error
-# end
-
-
-# # Stanley method for the steering control
-# function stanley_control(path_angle, cross_track_error, velocity, yaw, k)
-#     # Path error is normalized to the range [-π, π]
-#     return path_angle + atan(k * cross_track_error / max(velocity, 0.1)) # Prevent division by zero
-# end
-
-# # Function to determine the velocity based on the segment properties
-# function determine_velocity(segment, cross_track_error, velocity)
-#     # Limit the velocity by the speed limit and potential curvature of the road
-#     curvature = mean([boundary.curvature for boundary in segment.lane_boundaries])
-#     max_velocity = segment.speed_limit
-
-#     # Adjust the velocity based on the cross-track error, current velocity, and desired velocity change rate
-#     velocity_factor = 1.0 - abs(cross_track_error) / 5.0  # Adjust the scaling factor as needed
-#     velocity_factor = max(0.0, min(1.0, velocity_factor))
-#     desired_velocity = max_velocity * velocity_factor
-
-#     # Smooth the velocity change to avoid sudden jumps
-#     velocity_change_rate = 1.0  # Adjust the rate of velocity change as needed
-#     new_velocity = max(0.0, min(max_velocity, velocity + velocity_change_rate * (desired_velocity - velocity)))
-
-#     return new_velocity
-# end
-
 # Function to send commands to the vehicle
 function send_commands(steering_angle, velocity, socket)
     cmd = (steering_angle, velocity, true)
@@ -412,137 +261,7 @@ function is_at_segment_end(state, segment)
 end
 
 
-# function is_straight_segment(segment::VehicleSim.RoadSegment)
-#     # Check if all curvatures in the segment are negligible
-#     return all(lb -> abs(lb.curvature) < 0.01, segment.lane_boundaries)
-# end
-
-# function compute_stanley_navigation_commands(segment, state, yaw)
-#     # Determine the path's desired orientation at the closest point to the vehicle
-#     lane_center = (segment.lane_boundaries[1].pt_a + segment.lane_boundaries[end].pt_b) / 2
-#     path_angle = atan(lane_center[2] - state.position[2], lane_center[1] - state.position[1])
-#     path_error = path_angle - yaw  # Heading error
-
-#     # Cross-track error calculation should be norm of vector difference
-#     cross_track_error = norm([lane_center[1] - state.position[1], lane_center[2] - state.position[2]])
-
-#     # Stanley Control Law for Steering; calculate with correct division
-#     k = 1.0  # Control gain
-#     steering_angle = path_error + atan(k * cross_track_error / norm(state.velocity))  # Ensure state.velocity is not a vector here
-
-#     # Velocity control could be simplified or based on PID controllers for more accuracy
-#     velocity = min(segment.speed_limit, 2.0)  # Assuming a sensible constant speed for testing
-
-#     return steering_angle, velocity
-# end
-
-
-
-# function point_within_curve(point, center, start_angle, end_angle, radius, width)
-#     @info "Checking if point is within curved boundary"
-#     rel_point = point - center
-#     angle = atan(rel_point[2], rel_point[1])
-#     distance = norm(rel_point)
-
-#     # Normalize the angle to ensure it falls within the 0 to 2π range
-#     if angle < 0
-#         angle += 2 * π
-#     end
-#     if start_angle < 0
-#         start_angle += 2 * π
-#     end
-#     if end_angle < 0
-#         end_angle += 2 * π
-#     end
-
-#     # Check if the point's angle is between the start and end angles
-#     angle_within = (start_angle <= angle <= end_angle) || (start_angle <= angle + 2 * π <= end_angle)
-
-#     # Check if the point's distance from the center is within the radius bounds considering the road width
-#     distance_within = (radius - width / 2 <= distance <= radius + width / 2)
-
-#     result = angle_within && distance_within
-#     @info "Point within curve: $result, Angle: $angle, Distance: $distance"
-#     return result
-# end
-
-
-# Helper function to calculate the distance from a point to a line segment
-# function point_to_segment_distance(point, segment)
-#     #@info "Point input type and value: " typeof(point), point
-#     if length(point) < 2
-#         @error "Invalid point length"
-#         return Inf
-#     end
-#     try
-#         p = SVector{2, Float64}(point...)
-#         a, b = segment.pt_a, segment.pt_b
-#         ab = b - a
-#         ap = p - a
-#         t = dot(ap, ab) / dot(ab, ab)
-#         t = clamp(t, 0.0, 1.0)
-#         closest = a + t * ab
-#         distance = norm(p - closest)
-#         @info "Closest point on segment: $closest"
-#         @info "Distance from point to segment: $distance"
-#         return distance
-#     catch e
-#         @error "Failed to calculate point-to-segment distance" exception=(e, catch_backtrace())
-#         return Inf
-#     end
-# end
-
-
-# function is_within_curved_boundary(position, boundary)
-#     @info "Checking if position is within curved boundary"
-#     center = calculate_curve_center(boundary)
-#     radius = calculate_curve_radius(boundary)
-#     width = norm(boundary.pt_a - boundary.pt_b)
-#     start_angle, end_angle = calculate_curve_angles(center, boundary.pt_a, boundary.pt_b)
-#     result = point_within_curve(position, center, start_angle, end_angle, radius, width)
-#     @info "Point within curved boundary: $result"
-#     return result
-# end
-
-# function find_current_segment(position, map_segments)
-#     @info "Finding segment for position: $position"
-#     min_distance = Inf
-#     best_segment_id = -1
-#     for (id, segment) in map_segments
-#         within, distance = is_within_segment(position, segment)
-#         @info "Checked segment $id, within: $within, distance: $distance"
-#         if within && distance < min_distance
-#             min_distance = distance
-#             best_segment_id = id
-#         end
-#     end
-#     if best_segment_id != -1
-#         @info "Segment found: $best_segment_id"
-#         return best_segment_id
-#     else
-#         @error "No current segment found for position: $position"
-#         return -1
-#     end
-# end
-
-# function is_within_segment(position, segment)
-#     if segment.lane_boundaries[1].curvature != 0
-#         # Handle curved segment
-#         center = calculate_curve_center(segment)
-#         radius = calculate_curve_radius(segment)
-#         width = norm(segment.lane_boundaries[1].pt_a - segment.lane_boundaries[1].pt_b)
-#         start_angle, end_angle = calculate_curve_angles(center, segment.lane_boundaries[1].pt_a, segment.lane_boundaries[1].pt_b)
-#         result = point_within_curve(position, center, start_angle, end_angle, radius, width)
-#         distance = point_to_segment_distance(position, center, radius, start_angle, end_angle)  # This needs to be implemented
-#         return result, distance
-#     else
-#         # Handle straight segment
-#         distance = minimum(point_to_segment_distance(position, boundary) for boundary in segment.lane_boundaries)
-#         return distance <= 0.1, distance
-#     end
-# end
-
-const WHEELBASE_LENGTH = 1.1  # meters, for example
+const WHEELBASE_LENGTH = 5.0  # meters, for example
 
 mutable struct PIDController
     Kp::Float64
@@ -561,10 +280,10 @@ end
 
 # Initialize the PID controllers for steering and velocity
 steering_pid = PIDController(0.001, 0.01, 0.01, 0.0, 0.0)  # Tune these parameters
-velocity_pid = PIDController(10.0, 0.1, 0.05, 0.0, 0.0)  # Tune these parameters
+velocity_pid = PIDController(1.0, 0.1, 0.05, 0.0, 0.0)  # Tune these parameters
 acceptable_deviation_threshold = 0.75
 const SAFETY_MARGIN = 1.0
-const ERROR_MARGIN = 30
+const ERROR_MARGIN = 35
 
 function log_debug_info(segment, state, lookahead_point, steering_angle, velocity, yaw)
     @info "Segment ID: $(segment.id)"
@@ -602,7 +321,7 @@ function pure_pursuit_navigate(segment, localization_state_channel, state, socke
     @info "Checking deviation from lane center" deviation
     if deviation > ERROR_MARGIN
         @info "Deviation exceeds safety margin, vehicle too close to boundary, stopping."
-        send_commands(0.0, 0.0, socket)
+        send_commands(0, 0, socket)
         return false
     else
         @info "Deviation within acceptable range" deviation
@@ -611,6 +330,7 @@ function pure_pursuit_navigate(segment, localization_state_channel, state, socke
 
     # Calculate steering angle
     steering_angle = calculate_steering(state, lookahead_point, yaw, segment.lane_boundaries[1].curvature)
+    steering_angle= -steering_angle
 
     # Velocity control with PID adjustments
     dt = 0.1  # Simulation time step
@@ -622,6 +342,10 @@ function pure_pursuit_navigate(segment, localization_state_channel, state, socke
         @info "Segment end reached. Vehicle please stop if this is the last segment in the path."
         # Don't send a stop command here. Let the decision-making loop handle it.
         return true
+    end
+
+    if steering_angle != 0
+        steering_angle = steering_angle/3
     end
     
     send_commands(steering_angle, final_velocity, socket)
@@ -805,39 +529,3 @@ function within_segment(point, pt_a, pt_b)
                     minimum([pt_a[2], pt_b[2]]) <= point[2] <= maximum([pt_a[2], pt_b[2]])
     return collinear && within_bounds
 end
-
-# function within_lane_boundaries(point, lane_boundaries)
-#     count = 0
-#     n = length(lane_boundaries)
-#     for i in 1:n
-#         j = i % n + 1
-#         if ((lane_boundaries[i].pt_a[2] > point[2]) != (lane_boundaries[j].pt_a[2] > point[2])) &&
-#             (point[1] < (lane_boundaries[j].pt_a[1] - lane_boundaries[i].pt_a[1]) *
-#             (point[2] - lane_boundaries[i].pt_a[2]) / (lane_boundaries[j].pt_a[2] - lane_boundaries[i].pt_a[2]) +
-#             lane_boundaries[i].pt_a[1])
-#             count += 1
-#         end
-#     end
-#     return count % 2 == 1
-# end
-
-
-# function within_lane_boundaries(position, lane_boundaries)
-#     # Assuming the first half of the lane_boundaries array defines the right half of the road.
-#     num_boundaries = length(lane_boundaries) ÷ 2
-#     points = [b.pt_a for b in lane_boundaries[1:num_boundaries]]  # Use only the right half
-#     push!(points, lane_boundaries[num_boundaries].pt_b)  # Add the endpoint of the last boundary
-
-#     # Determine if the position is within the polygon defined by these points
-#     inside = false
-#     j = lastindex(points)
-#     for i in 1:length(points)
-#         if ((points[i][2] > position[2]) != (points[j][2] > position[2])) &&
-#            (position[1] < (points[j][1] - points[i][1]) * (position[2] - points[i][2]) / 
-#             (points[j][2] - points[i][2]) + points[i][1])
-#             inside = !inside
-#         end
-#         j = i
-#     end
-#     return inside
-# end

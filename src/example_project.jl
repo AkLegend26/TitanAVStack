@@ -5,17 +5,8 @@ struct MyLocalizationType
     angular_velocity::SVector{3, Float64} 
 end
 
-
-struct DetectedObject
-    id::Int
-    bbox::SVector{4, Int}  # Top, Left, Bottom, Right in pixel coordinates
-    world_position::Vector{Float64}  # Position in world coordinates
-    world_velocity::Vector{Float64}  # Velocity in world coordinates
-    threat_level::Float64  # An assessment of collision risk
-end
-
 struct MyPerceptionType
-    detected_objects::Vector{DetectedObject}
+    detectedObjects::SVector{5, Float64}
     timestamp::Float64
 end
 
@@ -306,6 +297,7 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
         !received && continue
         target_map_segment = measurement_msg.target_segment
         ego_vehicle_id = measurement_msg.vehicle_id
+        @info ego_vehicle_id
         for meas in measurement_msg.measurements
             if meas isa GPSMeasurement
                 !isfull(gps_channel) && put!(gps_channel, meas)
@@ -327,192 +319,165 @@ function my_client(host::IPAddr=IPv4(0), port=4444)
     #errormonitor(@async localize(gt_channel, localization_state_channel, ego_vehicle_id))
     errormonitor(@async localize(gps_channel, imu_channel, localization_state_channel))
     #@async test_localization(gt_channel, localization_state_channel)
-    @async perception(cam_channel, localization_state_channel, perception_state_channel)
+    #@async perception(cam_channel, localization_state_channel, perception_state_channel)
     sleep(0.001)
     errormonitor(@async decision_making(localization_state_channel, map_segments, socket, targets))
 end
 
-function perception(cam_channel, localization_state_channel, perception_state_channel)
-    @info "Perception process started."
-    object_id_counter = 1
-
+function perception(cam_meas_channel, localization_state_channel, perception_state_channel)
     while true
-        fresh_cam_meas = []
-    
-        while isready(cam_channel)
-            meas = take!(cam_channel)
-            push!(fresh_cam_meas, meas)
-            #@info "New camera measurement received" camera_id=meas.camera_id num_bboxes=length(meas.bounding_boxes) box=meas.bounding_boxes
-        end
-    
-        if !isempty(fresh_cam_meas)
-            latest_localization_state = fetch(localization_state_channel)
-            #@info "Processing new camera measurements" count=length(fresh_cam_meas)
-    
-            for meas in fresh_cam_meas
-                detected_objects = []
-                for bbox in meas.bounding_boxes
-                    try
-                        position, velocity = bbox_to_world(meas, bbox, latest_localization_state)
-                    catch e
-                        #@error "Failed to transform bounding box to world coordinates" exception=(e, catch_backtrace())
-                        continue  # Skip this bbox or handle the error appropriately
-                    end                    
-
-                    threat_level = assess_threat(position, velocity, latest_localization_state)
-                    detected_object = DetectedObject(object_id_counter, bbox, position, velocity, threat_level)
-                    push!(detected_objects, detected_object)
-                    object_id_counter += 1
-    
-                   # @info "Detected object" id=detected_object.id threat_level=detected_object.threat_level position=position velocity=velocity
-                end
-    
-                if !isempty(detected_objects)
-                    perception_state = MyPerceptionType(detected_objects, meas.time)
-                    if isready(perception_state_channel)
-                        take!(perception_state_channel)  # Clear the channel if full
-                    end
-                    put!(perception_state_channel, perception_state)
-                end
+        if isready(cam_meas_channel)
+            cam_data = take!(cam_meas_channel)
+            @info "Camera data received for processing."
+            detected_objects = process_camera_data(cam_data)
+            if isempty(detected_objects)
+                @info "No objects detected, skipping."
+                continue
             end
+            timestamp = cam_data.time  # Make sure the timestamp is correctly retrieved
+            perception_state = MyPerceptionType(detected_objects, timestamp)
+            put!(perception_state_channel, perception_state)
+            @info "Perception data processed and put to channel."
         else
-            #@info "No new camera measurements available"
+            @info "No camera measurements received, sleeping..."
+            sleep(0.1)
         end
-        sleep(0.01)  # Reduce CPU usage
-    end    
+        # Optional: Check if channels are synchronized
+        @info "Checking channel statuses", isready(localization_state_channel), isready(perception_state_channel)
+    end
 end
 
 
-function keyboard_client(host::IPAddr=IPv4(0), port=4444; v_step = 1.0, s_step = π/10)
-    @info "BabyyLegend"
-    #vis = Visualizer()
-    #open(vis)
-    socket = Sockets.connect(host, port)
-    map_segments = VehicleSim.city_map()
-    #VehicleSim.view_map(vis, map_segments)
-    msg = deserialize(socket) # Visualization info
-    @info msg
+# function keyboard_client(host::IPAddr=IPv4(0), port=4444; v_step = 1.0, s_step = π/10)
+#     @info "BabyyLegend"
+#     #vis = Visualizer()
+#     #open(vis)
+#     socket = Sockets.connect(host, port)
+#     map_segments = VehicleSim.city_map()
+#     #VehicleSim.view_map(vis, map_segments)
+#     msg = deserialize(socket) # Visualization info
+#     @info msg
 
-    gps_channel = Channel{GPSMeasurement}(32)
-    imu_channel = Channel{IMUMeasurement}(32)
-    cam_channel = Channel{CameraMeasurement}(32)
-    gt_channel = Channel{GroundTruthMeasurement}(32)
+#     gps_channel = Channel{GPSMeasurement}(32)
+#     imu_channel = Channel{IMUMeasurement}(32)
+#     cam_channel = Channel{CameraMeasurement}(32)
+#     gt_channel = Channel{GroundTruthMeasurement}(32)
 
-    localization_state_channel = Channel{MyLocalizationType}(1)
-    perception_state_channel = Channel{MyPerceptionType}(1)
+#     localization_state_channel = Channel{MyLocalizationType}(1)
+#     perception_state_channel = Channel{MyPerceptionType}(1)
 
-    client_info_string = 
-        "********************
-      TITANS REVING
-      ********************"
-    @info client_info_string
+#     client_info_string = 
+#         "********************
+#       TITANS REVING
+#       ********************"
+#     @info client_info_string
 
-    target_map_segment = 0 # (not a valid segment, will be overwritten by message)
-    ego_vehicle_id = 1 # (not a valid id, will be overwritten by message. This is used for discerning ground-truth messages)
-
-
+#     target_map_segment = 0 # (not a valid segment, will be overwritten by message)
+#     ego_vehicle_id = 1 # (not a valid id, will be overwritten by message. This is used for discerning ground-truth messages)
 
 
-    @async while isopen(socket)
-        sleep(0.001)
-        local measurement_msg
-        received = false
-        while true
-            @async eof(socket)
-            if bytesavailable(socket) > 0
-                measurement_msg = deserialize(socket)
-                received = true
-            else
-                break
-            end
-        end
-        !received && continue
-        target_map_segment = measurement_msg.target_segment
-        ego_vehicle_id = measurement_msg.vehicle_id
-        for meas in measurement_msg.measurements
-            if meas isa GPSMeasurement
-                !isfull(gps_channel) && put!(gps_channel, meas)
-            elseif meas isa IMUMeasurement
-                !isfull(imu_channel) && put!(imu_channel, meas)
-            elseif meas isa CameraMeasurement
-                !isfull(cam_channel) && put!(cam_channel, meas)
-            elseif meas isa GroundTruthMeasurement
-                !isfull(gt_channel) && put!(gt_channel, meas)
-            elseif meas isa Int
-                @info meas
-            else
-                @info "Received data of type $(typeof(meas))"
-            end
-        end
-    end
+
+
+#     @async while isopen(socket)
+#         sleep(0.001)
+#         local measurement_msg
+#         received = false
+#         while true
+#             @async eof(socket)
+#             if bytesavailable(socket) > 0
+#                 measurement_msg = deserialize(socket)
+#                 received = true
+#             else
+#                 break
+#             end
+#         end
+#         !received && continue
+#         target_map_segment = measurement_msg.target_segment
+#         ego_vehicle_id = measurement_msg.vehicle_id
+#         for meas in measurement_msg.measurements
+#             if meas isa GPSMeasurement
+#                 !isfull(gps_channel) && put!(gps_channel, meas)
+#             elseif meas isa IMUMeasurement
+#                 !isfull(imu_channel) && put!(imu_channel, meas)
+#             elseif meas isa CameraMeasurement
+#                 !isfull(cam_channel) && put!(cam_channel, meas)
+#             elseif meas isa GroundTruthMeasurement
+#                 !isfull(gt_channel) && put!(gt_channel, meas)
+#             elseif meas isa Int
+#                 @info meas
+#             else
+#                 @info "Received data of type $(typeof(meas))"
+#             end
+#         end
+#     end
     
-    # Monitor perception state for threats and respond accordingly
-    @async begin
-        while true
-            if isready(perception_state_channel)
-                #@info "ever here"
-                perception_state = take!(perception_state_channel)
-                for detected_object in perception_state.detected_objects
-                    if detected_object.threat_level > 0.5  # Threshold for alert
-                        @warn "High threat detected!" object=detected_object
-                        if detected_object.threat_level > 0.8  # Threshold for autonomous action
-                            @info "Taking evasive action!"
-                            # Adjust vehicle commands based on the threat
-                            target_velocity = max(target_velocity - v_step, 0)  # Slow down
-                            # Add steering adjustment logic if necessary
-                        end
-                    end
-                end
-            end
-            sleep(0.01)  # Check time
-        end
-    end
-    target_velocity = 0.0
-    steering_angle = 0.0
-    controlled = true
+#     # Monitor perception state for threats and respond accordingly
+#     @async begin
+#         while true
+#             if isready(perception_state_channel)
+#                 #@info "ever here"
+#                 perception_state = take!(perception_state_channel)
+#                 for detected_object in perception_state.detected_objects
+#                     if detected_object.threat_level > 0.5  # Threshold for alert
+#                         @warn "High threat detected!" object=detected_object
+#                         if detected_object.threat_level > 0.8  # Threshold for autonomous action
+#                             @info "Taking evasive action!"
+#                             # Adjust vehicle commands based on the threat
+#                             target_velocity = max(target_velocity - v_step, 0)  # Slow down
+#                             # Add steering adjustment logic if necessary
+#                         end
+#                     end
+#                 end
+#             end
+#             sleep(0.01)  # Check time
+#         end
+#     end
+#     target_velocity = 0.0
+#     steering_angle = 0.0
+#     controlled = true
     
-    client_info_string = 
-        "********************
-      Keyboard Control (manual mode)
-      ********************
-        -Press 'q' at any time to terminate vehicle.
-        -Press 'i' to increase vehicle speed.
-        -Press 'k' to decrease vehicle speed.
-        -Press 'j' to increase steering angle (turn left).
-        -Press 'l' to decrease steering angle (turn right)."
-    #@info client_info_string
-    errormonitor(@async localize(gt_channel, localization_state_channel, ego_vehicle_id))
-    #@async test_localization(gt_channel, localization_state_channel)
+#     client_info_string = 
+#         "********************
+#       Keyboard Control (manual mode)
+#       ********************
+#         -Press 'q' at any time to terminate vehicle.
+#         -Press 'i' to increase vehicle speed.
+#         -Press 'k' to decrease vehicle speed.
+#         -Press 'j' to increase steering angle (turn left).
+#         -Press 'l' to decrease steering angle (turn right)."
+#     #@info client_info_string
+#     errormonitor(@async localize(gt_channel, localization_state_channel, ego_vehicle_id))
+#     #@async test_localization(gt_channel, localization_state_channel)
 
-    @async perception(cam_channel, localization_state_channel, perception_state_channel)
+#     @async perception(cam_channel, localization_state_channel, perception_state_channel)
 
-    while controlled && isopen(socket)
-        key = get_c()
-        if key == 'q'
-            # terminate vehicle
-            controlled = false
-            target_velocity = 0.0
-            steering_angle = 0.0
-            @info "Terminating Keyboard Client."
-        elseif key == 'i'
-            # increase target velocity
-            target_velocity += v_step
-            @info "Target velocity: $target_velocity"
-        elseif key == 'k'
-            # decrease forward force
-            target_velocity -= v_step
-            @info "Target velocity: $target_velocity"
-        elseif key == 'j'
-            # increase steering angle
-            steering_angle += s_step
-            @info "Target steering angle: $steering_angle"
-        elseif key == 'l'
-            # decrease steering angle
-            steering_angle -= s_step
-            @info "Target steering angle: $steering_angle"
-        end
+#     while controlled && isopen(socket)
+#         key = get_c()
+#         if key == 'q'
+#             # terminate vehicle
+#             controlled = false
+#             target_velocity = 0.0
+#             steering_angle = 0.0
+#             @info "Terminating Keyboard Client."
+#         elseif key == 'i'
+#             # increase target velocity
+#             target_velocity += v_step
+#             @info "Target velocity: $target_velocity"
+#         elseif key == 'k'
+#             # decrease forward force
+#             target_velocity -= v_step
+#             @info "Target velocity: $target_velocity"
+#         elseif key == 'j'
+#             # increase steering angle
+#             steering_angle += s_step
+#             @info "Target steering angle: $steering_angle"
+#         elseif key == 'l'
+#             # decrease steering angle
+#             steering_angle -= s_step
+#             @info "Target steering angle: $steering_angle"
+#         end
         
-        cmd = (steering_angle, target_velocity, controlled)
-        serialize(socket, cmd)
-    end
-end
+#         cmd = (steering_angle, target_velocity, controlled)
+#         serialize(socket, cmd)
+#     end
+# end
