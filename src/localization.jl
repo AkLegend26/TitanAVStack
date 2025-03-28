@@ -1,6 +1,6 @@
 mutable struct ExtendedKalmanFilter
-    state::Vector{Float64}                # Expanded state vector if needed
-    covariance::Matrix{Float64}           # Covariance matrix for the state vector
+    state::Vector{Float64}                # Expanded state vector 
+    covariance::Matrix{Float64}           # Covariance matrix 
     process_noise::Matrix{Float64}        # Process noise covariance matrix
     measurement_noise_gps::Matrix{Float64}  # Measurement noise matrix for GPS
     measurement_noise_imu::Matrix{Float64}  # Measurement noise matrix for IMU
@@ -84,7 +84,6 @@ function Rot_from_quat(q)
 end
 
 function get_gps_transform()
-    # TODO load this from URDF
     R_gps_to_body = one(RotMatrix{3, Float64})
     t_gps_to_body = [-3.0, 1, 2.6]
     T = [R_gps_to_body t_gps_to_body]
@@ -147,23 +146,19 @@ function Jac_h_gps(x)
 end
 
 function h_imu(state::Vector{Float64})
-    # Assuming state vector layout is:
+    # state vector layout is:
     # [x, y, z, qx, qy, qz, qw, vx, vy, vz, ωx, ωy, ωz]
 
-    # Extract linear and angular velocities from the state
+    # Extracting linear and angular velocities
     linear_velocity = state[8:10]  # vx, vy, vz
     angular_velocity = state[11:13]  # ωx, ωy, ωz
 
-    # Return the concatenation of linear and angular velocities as the measurement vector
+    # Returning measurement vector
     return [linear_velocity; angular_velocity]
 end
 
 
 function jac_h_imu(state::Vector{Float64})
-    # Assuming state vector layout is:
-    # [x, y, z, qx, qy, qz, qw, vx, vy, vz, ωx, ωy, ωz]
-
-    # Initialize the Jacobian matrix for IMU measurements
     # IMU measures 3 linear velocities and 3 angular velocities
     J = zeros(6, length(state))
 
@@ -185,7 +180,7 @@ function normalize_quaternion(q)
     if norm > 0
         return q / norm
     else
-        return q  # Handle zero norm case more robustly if possible
+        return q  # Zero norm case
     end
 end
 
@@ -197,11 +192,11 @@ function ekf_predict(ekf::ExtendedKalmanFilter, Δt::Float64)
 end
 
 function predict_quaternion(q, omega, dt)
-    # Compute the quaternion derivative
+    # Computing the quaternion derivative
     q_dot = quaternion_derivative(q, omega)
-    # Integrate to get the new quaternion
+    # New quaternion step
     q_new = q + q_dot * dt
-    # Normalize the quaternion to avoid drift
+    # Normalizing quaternion
     return normalize_quaternion(q_new)
 end
 
@@ -221,17 +216,16 @@ function ekf_update!(ekf::ExtendedKalmanFilter, measurement, measurement_functio
 end
 
 function ekf_initialize()
-    # Expanded state vector, including a properly initialized quaternion
-    state = zeros(13)  # Adjust the size if necessary to fit all your state variables
-    state[4:7] = [1.0, 0.0, 0.0, 0.0]  # Initialize the quaternion part to identity quaternion
+    state = zeros(13)  
+    state[4:7] = [1.0, 0.0, 0.0, 0.0]  # Initialize the quaternion
 
     covariance = diagm(0 => 0.1 * ones(13))
-    # Increase initial uncertainty for the quaternion if needed
+    # Uncertainty for the quaternion
     covariance[4:7, 4:7] *= 1  # increase the initial uncertainty of the quaternion
 
     process_noise = diagm(0 => 0.1 * ones(13))
-    measurement_noise_gps = diagm(0 => [0.1, 0.1, 0.1])  # You might need to adjust this based on your measurement structure
-    measurement_noise_imu = diagm(0 => 0.1 * ones(6))  # Adjust as necessary for the actual number of IMU measurements
+    measurement_noise_gps = diagm(0 => [0.1, 0.1, 0.1])  # 
+    measurement_noise_imu = diagm(0 => 0.1 * ones(6))  #
 
     ExtendedKalmanFilter(state, covariance, process_noise, measurement_noise_gps, measurement_noise_imu)
 end
@@ -241,9 +235,7 @@ function run_localization_loop(ekf)
     Δt = 0.1  # time step
     while true
         ekf = ekf_predict(ekf, Δt)
-        # Example usage for GPS:
         gps_measurement = [get_gps_x(), get_gps_y()]  # Fetch GPS data
         ekf_update!(ekf, gps_measurement, h_gps, Jac_h_gps, ekf.measurement_noise_gps)
-        # Use ekf.state for vehicle control and navigation
     end
 end
