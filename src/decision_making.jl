@@ -20,7 +20,7 @@ function find_current_segment(position, map_segments)
 
     best_segment_id, closest_distance = check_segments(map_segments, position)
 
-    # If no suitable segment is found, check the children of the segments
+    # If no suitable segment is found, checking the children of the segments
     if best_segment_id == -1
         for (id, segment) in map_segments
             if !isempty(segment.children)
@@ -98,7 +98,7 @@ function calculate_curve_center(boundary)
     vec = pt_b - pt_a
     perpendicular = [vec[2], -vec[1]]  # Rotate vector 90 degrees
     
-    # Determine the direction based on the sign of curvature
+    # Determining the direction based on the sign of curvature
     direction = sign(boundary.curvature)
     radius = abs(1.0 / boundary.curvature)
     
@@ -108,7 +108,7 @@ function calculate_curve_center(boundary)
         center = midpoint + norm_perpendicular * radius * direction
         return center
     else
-        return midpoint  # This should not happen for curved roads
+        return midpoint  # not possible on curved roads edge
     end
 end
 
@@ -125,12 +125,12 @@ function is_within_angle(pt_a, pt_b, center, angle)
     angle_a = (angle_a + 2π) % (2π)
     angle_b = (angle_b + 2π) % (2π)
 
-    # Ensure angle_a is less than angle_b
+    # Asserting angle_a is less than angle_b
     if angle_a > angle_b
         angle_a, angle_b = angle_b, angle_a
     end
 
-    # Check if angle is between angle_a and angle_b
+    # Validity of angle (between a and b)
     angle_a <= angle && angle <= angle_b
 end
 
@@ -203,7 +203,7 @@ end
 
 
 function calculate_segment_center(segment)
-    # Calculate the centroid of the segment based on its boundary points
+    # Calculating the centroid of the segment based on its boundary points
     x_sum = y_sum = 0
     count = 0  # Total number of points
     
@@ -214,7 +214,7 @@ function calculate_segment_center(segment)
         count += 2
     end
     
-    # Calculate the average of all x and y coordinates
+    # Calculating the average of all x and y coordinates
     centroid_x = x_sum / count
     centroid_y = y_sum / count
     
@@ -240,17 +240,17 @@ function send_commands(steering_angle, velocity, socket)
 end
 
 function is_at_segment_end(state, segment)
-    # Extract position and ensure it's in a compatible format
+    # Extract positions
     position = state.position[1:2]  # Assuming the position is an SVector
 
     # Determine the target endpoint for the segment
     target_position = segment.lane_boundaries[end].pt_b
     distance_to_target = norm(position - target_position)  # Euclidean distance in 2D
 
-    # Define a tolerance within which we consider the segment end reached
-    tolerance = 10.0  # Adjust based on your application's specific scale and needs
+    # Tolerance within which we consider the segment end reached
+    tolerance = 10.0  #Change/tweak for determining more steering and control over vehicle
 
-    # Log detailed information to help with debugging
+    # Log detailed information for debugging
     @info "Checking if segment end is reached" current_position=position target_position=target_position distance_to_target=distance_to_target
 
     # Check if within tolerance
@@ -261,7 +261,7 @@ function is_at_segment_end(state, segment)
 end
 
 
-const WHEELBASE_LENGTH = 5.0  # meters, for example
+const WHEELBASE_LENGTH = 5.0  # meters
 
 mutable struct PIDController
     Kp::Float64
@@ -279,8 +279,8 @@ function update_pid(controller::PIDController, error::Float64, dt::Float64)
 end
 
 # Initialize the PID controllers for steering and velocity
-steering_pid = PIDController(0.001, 0.01, 0.01, 0.0, 0.0)  # Tune these parameters
-velocity_pid = PIDController(1.0, 0.1, 0.05, 0.0, 0.0)  # Tune these parameters
+steering_pid = PIDController(0.001, 0.01, 0.01, 0.0, 0.0)  # Manually tuned
+velocity_pid = PIDController(1.0, 0.1, 0.05, 0.0, 0.0)  # Manually tuned
 acceptable_deviation_threshold = 0.75
 const SAFETY_MARGIN = 1.0
 const ERROR_MARGIN = 35
@@ -340,7 +340,6 @@ function pure_pursuit_navigate(segment, localization_state_channel, state, socke
 
     if is_at_segment_end(state, segment)
         @info "Segment end reached. Vehicle please stop if this is the last segment in the path."
-        # Don't send a stop command here. Let the decision-making loop handle it.
         return true
     end
 
@@ -355,7 +354,7 @@ function pure_pursuit_navigate(segment, localization_state_channel, state, socke
 end
 
 function aligned_with_road(position, yaw, segment)
-    # Check if the current heading aligns with the road's direction
+    # Checking if the current heading aligns with the road's direction
     road_direction = atan(segment.lane_boundaries[end].pt_b[2] - segment.lane_boundaries[1].pt_a[2],
                            segment.lane_boundaries[end].pt_b[1] - segment.lane_boundaries[1].pt_a[1])
     return abs((yaw - road_direction + π) % (2π) - π) < 0.1  # Threshold for alignment
@@ -446,7 +445,7 @@ function adjust_velocity(segment, current_velocity, dt)
 
     new_velocity = norm(current_velocity[1:2]) + acceleration * dt
     if new_velocity < min_required_velocity
-        new_velocity = min_required_velocity  # Ensure a minimum velocity if below threshold
+        new_velocity = min_required_velocity  # Ensuring a minimum velocity if below threshold
     end
     return min(new_velocity, desired_velocity)
 end
@@ -481,7 +480,7 @@ function calculate_lane_center(lane_boundaries)
 end
 
 function calculate_deviation_from_center(position, lane_center)
-    # Simple Euclidean distance for this example, consider more complex geometric calculations as needed
+    # Simple Euclidean distance
     return norm(position[1:2] - lane_center[1:2])
 end
 
@@ -495,7 +494,7 @@ function apply_steering_correction(state, correction)
 end
 
 function apply_steering_limit(steering_angle)
-    max_steering_angle = π / 4  # Limit to 45 degrees (about 0.785 radians)
+    max_steering_angle = π / 4  # Limit to 45 degrees
     return clamp(steering_angle, -max_steering_angle, max_steering_angle)
 end
 
