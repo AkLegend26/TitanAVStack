@@ -63,7 +63,7 @@ function localize(gps_channel::Channel{GPSMeasurement}, imu_channel::Channel{IMU
             sleep(0.00001)  # Manage loop timing
         catch e
             @error "Error in localization process" exception=(e, catch_backtrace())
-            continue  # Optionally break or continue based on error severity
+            continue  
         end
     end
 end
@@ -94,7 +94,7 @@ function localize(gt_channel::Channel{GroundTruthMeasurement}, localization_stat
 
                     # Ensure the localization state channel is not full before putting new data
                     if isready(localization_state_channel)
-                        take!(localization_state_channel)  # Clear the channel if full
+                        take!(localization_state_channel) 
                     end
 
                     put!(localization_state_channel, localized_state)
@@ -181,14 +181,14 @@ function isfull(ch::Channel)
 end
 
 function quaternion_angle_difference(q1::SVector{4, Float64}, q2::SVector{4, Float64})
-    # Normalize the quaternions to ensure they represent valid rotations
+    # Normalizing quaternions
     q1_normalized = normalize(q1)
     q2_normalized = normalize(q2)
     
-    # Calculate the dot product, which is cos(theta) where theta is the angle between them
+    # Calculating the dot product, which is cos(theta) where theta is the angle between them
     cos_theta = dot(q1_normalized, q2_normalized)
     
-    # Calculate the angle in radians
+    # Angle in radians
     theta = acos(clamp(cos_theta, -1.0, 1.0))  # Clamp for numerical stability
     return theta
 end
@@ -196,7 +196,7 @@ end
 function test_localization(gt_channel, localization_state_channel)
     @info "Starting localization testing task..."
 
-    gt_list = []  # Store ground truth measurements in a list
+    gt_list = []  # Ground truth measurements in a list
     errors = Dict("position" => [], "velocity" => [], "orientation" => [])
 
     try
@@ -210,7 +210,7 @@ function test_localization(gt_channel, localization_state_channel)
             end
             if isready(localization_state_channel) && !isempty(gt_list)
                 est_state = take!(localization_state_channel)
-                gt_state = last(gt_list)  # Assuming the latest ground truth is what we want to compare against
+                gt_state = last(gt_list)  
 
                 pos_error = norm(est_state.position[1:2] - gt_state.position[1:2])  # Compare only x, y
                 vel_error = norm(est_state.velocity[1:2] - gt_state.velocity[1:2])  # Compare velocity magnitudes
@@ -226,7 +226,7 @@ function test_localization(gt_channel, localization_state_channel)
                     #@error "Invalid quaternion data types"
                 end
 
-                # Store the computed errors
+                # Storing the computed errors
                 push!(errors["position"], pos_error)
                 push!(errors["velocity"], vel_error)
                 push!(errors["orientation"], ori_error)
